@@ -672,7 +672,7 @@ const SETTING_GROUPS = [
   },
   {
     title: "Verhalten",
-    hint: "Solange Dry Run aktiv ist, wird nur geplant.",
+    hint: "Solange Dry Run aktiv ist, wird nur geplant. Das Prüfintervall bestimmt auch, wie lange eine fertige Datei auf ihre Einsortierung wartet.",
     keys: [
       "dry_run", "auto_threshold", "scan_interval_seconds", "stability_checks", "min_video_size_mb",
       "verify_mode", "free_space_margin_mb", "move_subtitles", "delete_empty_source_dirs",
@@ -714,7 +714,7 @@ const SETTING_LABEL = {
   dry_run: "Dry Run",
   auto_threshold: "Automatische Erkennungsschwelle in Prozent",
   scan_interval_seconds: "Prüfintervall in Sekunden",
-  stability_checks: "Stabile Prüfungen vor der Analyse",
+  stability_checks: "Unveränderte Durchläufe vor der Analyse",
   min_video_size_mb: "Mindestgröße Video in MB",
   verify_mode: "Prüfung beim Kopieren",
   free_space_margin_mb: "Reserve freier Speicher in MB",
