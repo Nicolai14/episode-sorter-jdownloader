@@ -6,6 +6,8 @@ const state = {
   openJob: null,
   paused: false,
   librarySort: localStorage.getItem("es-library-sort") || "recent",
+  libraryOpen: JSON.parse(localStorage.getItem("es-library-open") || "{}"),
+  libraryShowAll: {},
   settings: null,
   timer: null,
 };
@@ -417,6 +419,7 @@ const LIBRARY_GROUPS = [
   { key: "series", label: "Serien" },
   { key: "movie", label: "Filme" },
 ];
+const LIBRARY_LIMIT = 30;
 
 function rootLabel(path) {
   const parts = String(path || "").split("/").filter(Boolean);
@@ -446,6 +449,22 @@ function sortLibrary(items) {
   });
 }
 
+function libraryRow(item) {
+  const facts = [
+    rootLabel(item.root),
+    (item.seasons || []).length ? plural(item.seasons.length, "Staffel", "Staffeln") : "",
+    item.file_count ? plural(item.file_count, "Datei", "Dateien") : "",
+  ].filter(Boolean);
+  return `
+    <div class="list-item" data-title="${esc((item.title + " " + item.folder_name).toLowerCase())}">
+      <span>
+        ${esc(item.folder_name)}
+        <div class="row-sub">${esc(facts.join(" / "))}</div>
+      </span>
+      <span class="row-sub" title="${esc(item.last_added || "")}">${esc(addedLabel(item.last_added))}</span>
+    </div>`;
+}
+
 async function renderLibrary(root) {
   const payload = await api("/api/library?limit=2000");
   const items = payload.items;
@@ -467,50 +486,78 @@ async function renderLibrary(root) {
       <div class="toolbar">
         <div class="field">
           <label for="libSearch">Suche</label>
-          <input type="text" id="libSearch" placeholder="Titel filtern" autocomplete="off">
+          <input type="search" id="libSearch" placeholder="Titel filtern" autocomplete="off">
         </div>
         <div class="field">
-          <label id="sortLabel">Sortierung</label>
+          <span class="field-label" id="sortLabel">Sortierung</span>
           <div class="segmented" role="group" aria-labelledby="sortLabel">
-            <button class="segment${state.librarySort === "recent" ? " is-active" : ""}" data-action="lib-sort" data-sort="recent">Zuletzt ergänzt</button>
-            <button class="segment${state.librarySort === "name" ? " is-active" : ""}" data-action="lib-sort" data-sort="name">Name</button>
+            <button type="button" class="segment${state.librarySort === "recent" ? " is-active" : ""}" data-action="lib-sort" data-sort="recent">Zuletzt ergänzt</button>
+            <button type="button" class="segment${state.librarySort === "name" ? " is-active" : ""}" data-action="lib-sort" data-sort="name">Name</button>
           </div>
         </div>
       </div>
     </section>
 
     ${groups.map((group) => `
-      <section class="block" data-group="${group.key}">
-        <div class="block-head">
-          <div><h2>${esc(group.label)}</h2><p>${plural(group.items.length, "Ordner", "Ordner")}</p></div>
-        </div>
-        <div class="list">
-          ${group.items.map((item) => `
-            <div class="list-item" data-title="${esc((item.title + " " + item.folder_name).toLowerCase())}">
-              <span>
-                ${esc(item.folder_name)}
-                <div class="row-sub">${esc(rootLabel(item.root))}${(item.seasons || []).length ? ` / ${plural(item.seasons.length, "Staffel", "Staffeln")}` : ""}${item.file_count ? ` / ${plural(item.file_count, "Datei", "Dateien")}` : ""}</div>
-              </span>
-              <span class="row-sub" title="${esc(item.last_added || "")}">${esc(addedLabel(item.last_added))}</span>
-            </div>`).join("")}
-        </div>
+      <section class="block group" data-group="${group.key}">
+        <details${state.libraryOpen[group.key] === false ? "" : " open"} data-group="${group.key}">
+          <summary class="group-head">
+            <span class="group-caret" aria-hidden="true"></span>
+            <span class="group-title">${esc(group.label)}</span>
+            <span class="group-meta">${plural(group.items.length, "Ordner", "Ordner")}</span>
+          </summary>
+          <div class="list">${group.items.map(libraryRow).join("")}</div>
+          <div class="more">
+            <button type="button" class="btn btn-small" data-action="lib-more" data-group="${group.key}"></button>
+          </div>
+        </details>
       </section>`).join("") || emptyState("Nichts indexiert", "Prüfe die Zielpfade in den Einstellungen und lies die Bibliothek neu ein.")}
   `;
 
-  const search = qs("#libSearch", root);
-  search.addEventListener("input", () => {
-    const needle = search.value.toLowerCase();
-    qsa("section[data-group]", root).forEach((section) => {
-      let visible = 0;
-      qsa(".list-item", section).forEach((node) => {
-        const hit = node.dataset.title.includes(needle);
-        node.style.display = hit ? "" : "none";
-        if (hit) visible += 1;
-      });
-      section.style.display = visible ? "" : "none";
+  qsa("details[data-group]", root).forEach((details) => {
+    details.addEventListener("toggle", () => {
+      state.libraryOpen[details.dataset.group] = details.open;
+      localStorage.setItem("es-library-open", JSON.stringify(state.libraryOpen));
     });
   });
+
+  const search = qs("#libSearch", root);
+  search.addEventListener("input", () => applyLibraryFilter(root));
+  applyLibraryFilter(root);
   bindJobRows(root);
+}
+
+function applyLibraryFilter(root) {
+  const search = qs("#libSearch", root);
+  const needle = (search ? search.value : "").toLowerCase().trim();
+
+  qsa("section[data-group]", root).forEach((section) => {
+    const key = section.dataset.group;
+    const showAll = Boolean(state.libraryShowAll[key]) || Boolean(needle);
+    const rows = qsa(".list-item", section);
+    let hits = 0;
+    rows.forEach((row) => {
+      const hit = !needle || row.dataset.title.includes(needle);
+      if (hit) hits += 1;
+      row.hidden = !hit || (!showAll && hits > LIBRARY_LIMIT);
+    });
+
+    section.hidden = needle ? hits === 0 : false;
+    const details = qs("details", section);
+    if (needle && hits) details.open = true;
+
+    const more = qs(".more", section);
+    const button = qs("button", more);
+    const hidden = Math.max(0, hits - LIBRARY_LIMIT);
+    if (needle || (!hidden && !state.libraryShowAll[key])) {
+      more.hidden = true;
+    } else {
+      more.hidden = false;
+      button.textContent = state.libraryShowAll[key]
+        ? `Nur die letzten ${LIBRARY_LIMIT} zeigen`
+        : `Alle ${hits} anzeigen`;
+    }
+  });
 }
 
 async function renderRules(root) {
@@ -733,6 +780,13 @@ async function onClick(event) {
 
   if (action === "decision") {
     await sendDecision(trigger.dataset.job, trigger.dataset.decision, {}, trigger);
+    return;
+  }
+
+  if (action === "lib-more") {
+    const key = trigger.dataset.group;
+    state.libraryShowAll[key] = !state.libraryShowAll[key];
+    applyLibraryFilter(qs("#view"));
     return;
   }
 
