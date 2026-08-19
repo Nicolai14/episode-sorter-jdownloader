@@ -673,7 +673,11 @@ const SETTING_GROUPS = [
   {
     title: "Verhalten",
     hint: "Solange Dry Run aktiv ist, wird nur geplant.",
-    keys: ["dry_run", "auto_threshold", "scan_interval_seconds", "stability_checks", "min_video_size_mb", "verify_mode", "free_space_margin_mb", "move_subtitles", "delete_empty_source_dirs"],
+    keys: [
+      "dry_run", "auto_threshold", "scan_interval_seconds", "stability_checks", "min_video_size_mb",
+      "verify_mode", "free_space_margin_mb", "move_subtitles", "delete_empty_source_dirs",
+      "event_retention", "job_retention_days",
+    ],
   },
   {
     title: "Dateinamen",
@@ -716,6 +720,8 @@ const SETTING_LABEL = {
   free_space_margin_mb: "Reserve freier Speicher in MB",
   move_subtitles: "Untertitel mitnehmen",
   delete_empty_source_dirs: "Leere Quellordner entfernen",
+  event_retention: "Protokolleinträge aufbewahren",
+  job_retention_days: "Erledigte Jobs aufbewahren in Tagen",
   episode_template: "Episodenname",
   episode_range_template: "Mehrfachfolge",
   movie_template: "Filmname",
