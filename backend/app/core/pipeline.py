@@ -156,6 +156,25 @@ def _package_video_count(session: Session, job: Job) -> int:
     return total
 
 
+def _anime_crosscheck(
+    candidates: list[metadata.Candidate], title: str | None, year: int | None, media_type: str
+) -> tuple[str, str | None]:
+    """AniList only knows anime. A German anime release looks exactly like a series release,
+    so a matching AniList entry outranks the TMDb classification."""
+    if media_type not in {"series", "unknown"} or not title:
+        return media_type, None
+    for candidate in candidates:
+        if candidate.source != "anilist":
+            continue
+        names = [candidate.title, candidate.english_title, *(candidate.alt_titles or [])]
+        if max((metadata.similarity(name, title) for name in names if name), default=0.0) < 0.85:
+            continue
+        if year and candidate.year and abs(year - candidate.year) > 1:
+            continue
+        return "anime", f"AniList knows this title ({candidate.title}), treated as anime"
+    return media_type, None
+
+
 def _pick_media_type(parsed: ParseResult, best: metadata.Candidate | None, rule: Rule | None) -> str:
     if rule:
         return rule.media_type
@@ -248,6 +267,10 @@ def analyze(session: Session, job: Job) -> Job:
         job.tmdb_id = best.external_id if best and best.source == "tmdb" else None
         job.anilist_id = best.external_id if best and best.source == "anilist" else None
 
+    if not rule:
+        media_type, crosscheck_note = _anime_crosscheck(candidates, job.title, job.year, media_type)
+        if crosscheck_note:
+            notes.append(crosscheck_note)
     job.media_type = media_type
 
     if media_type == "unknown":
@@ -281,6 +304,10 @@ def analyze(session: Session, job: Job) -> Job:
     elif folder_match:
         existing_folder = folder_match.item.path
         notes.append(f"{folder_match.reason}: {folder_match.item.path}")
+        if folder_match.item.media_type in {"anime", "series"} and media_type in {"anime", "series"}:
+            # The folder location is the strongest signal about what this title is.
+            media_type = folder_match.item.media_type
+            job.media_type = media_type
     job.existing_folder = existing_folder
 
     base_dir = library.default_root(media_type) or config.get("series_path")
