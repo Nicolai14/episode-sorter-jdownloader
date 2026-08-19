@@ -5,6 +5,7 @@ const state = {
   status: null,
   openJob: null,
   paused: false,
+  librarySort: localStorage.getItem("es-library-sort") || "recent",
   settings: null,
   timer: null,
 };
@@ -408,41 +409,97 @@ function packageRow(pkg) {
   </article>`;
 }
 
+const LIBRARY_GROUPS = [
+  { key: "anime", label: "Anime" },
+  { key: "series", label: "Serien" },
+  { key: "movie", label: "Filme" },
+];
+
+function rootLabel(path) {
+  const parts = String(path || "").split("/").filter(Boolean);
+  return parts.slice(-2).join("/") || path;
+}
+
+function addedLabel(iso) {
+  if (!iso) return "kein Datum";
+  const then = new Date(iso);
+  const days = (Date.now() - then.getTime()) / 86400000;
+  if (days < 1) return relTime(iso);
+  if (days < 14) return `vor ${Math.round(days)} Tagen`;
+  return then.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function sortLibrary(items) {
+  const byName = (a, b) => a.title.localeCompare(b.title, "de", { sensitivity: "base" });
+  if (state.librarySort === "name") return [...items].sort(byName);
+  return [...items].sort((a, b) => {
+    if (!a.last_added && !b.last_added) return byName(a, b);
+    if (!a.last_added) return 1;
+    if (!b.last_added) return -1;
+    return b.last_added.localeCompare(a.last_added);
+  });
+}
+
 async function renderLibrary(root) {
-  const payload = await api("/api/library?limit=1500");
+  const payload = await api("/api/library?limit=2000");
   const items = payload.items;
-  const grouped = items.reduce((acc, item) => {
-    (acc[item.root] = acc[item.root] || []).push(item);
-    return acc;
-  }, {});
+  const groups = LIBRARY_GROUPS
+    .map((group) => ({ ...group, items: sortLibrary(items.filter((item) => item.media_type === group.key)) }))
+    .filter((group) => group.items.length);
+
   root.innerHTML = `
     <section class="block">
       <div class="block-head">
-        <div><h2>${plural(items.length, "Ordner indexiert", "Ordner indexiert")}</h2><p>Beim Start und auf Knopfdruck neu eingelesen.</p></div>
+        <div>
+          <h2>${plural(items.length, "Ordner indexiert", "Ordner indexiert")}</h2>
+          <p>Ein Titel, der hier steht, bekommt neue Folgen genau in diesen Ordner.</p>
+        </div>
         <div class="row-actions"><button class="btn" data-action="reindex">Neu einlesen</button></div>
       </div>
-      <div class="field" style="max-width: 320px;">
-        <label for="libSearch">Suche</label>
-        <input type="text" id="libSearch" placeholder="Titel filtern">
+      <div class="toolbar">
+        <div class="field">
+          <label for="libSearch">Suche</label>
+          <input type="text" id="libSearch" placeholder="Titel filtern" autocomplete="off">
+        </div>
+        <div class="field">
+          <label id="sortLabel">Sortierung</label>
+          <div class="segmented" role="group" aria-labelledby="sortLabel">
+            <button class="segment${state.librarySort === "recent" ? " is-active" : ""}" data-action="lib-sort" data-sort="recent">Zuletzt ergänzt</button>
+            <button class="segment${state.librarySort === "name" ? " is-active" : ""}" data-action="lib-sort" data-sort="name">Name</button>
+          </div>
+        </div>
       </div>
     </section>
-    ${Object.entries(grouped).map(([rootPath, entries]) => `
-      <section class="block" data-root="${esc(rootPath)}">
-        <div class="block-head"><div><h2 class="path">${esc(rootPath)}</h2><p>${plural(entries.length, "Ordner", "Ordner")}</p></div></div>
+
+    ${groups.map((group) => `
+      <section class="block" data-group="${group.key}">
+        <div class="block-head">
+          <div><h2>${esc(group.label)}</h2><p>${plural(group.items.length, "Ordner", "Ordner")}</p></div>
+        </div>
         <div class="list">
-          ${entries.map((item) => `
-            <div class="list-item" data-title="${esc(item.title.toLowerCase())}">
-              <span>${esc(item.folder_name)}</span>
-              <span class="row-sub">${esc(MEDIA_LABEL[item.media_type] || item.media_type)}${(item.seasons || []).length ? ` / ${item.seasons.length} Staffeln` : ""}</span>
+          ${group.items.map((item) => `
+            <div class="list-item" data-title="${esc((item.title + " " + item.folder_name).toLowerCase())}">
+              <span>
+                ${esc(item.folder_name)}
+                <div class="row-sub">${esc(rootLabel(item.root))}${(item.seasons || []).length ? ` / ${plural(item.seasons.length, "Staffel", "Staffeln")}` : ""}${item.file_count ? ` / ${plural(item.file_count, "Datei", "Dateien")}` : ""}</div>
+              </span>
+              <span class="row-sub" title="${esc(item.last_added || "")}">${esc(addedLabel(item.last_added))}</span>
             </div>`).join("")}
         </div>
-      </section>`).join("")}`;
+      </section>`).join("") || emptyState("Nichts indexiert", "Prüfe die Zielpfade in den Einstellungen und lies die Bibliothek neu ein.")}
+  `;
 
   const search = qs("#libSearch", root);
   search.addEventListener("input", () => {
     const needle = search.value.toLowerCase();
-    qsa(".list-item", root).forEach((node) => {
-      node.style.display = node.dataset.title.includes(needle) ? "" : "none";
+    qsa("section[data-group]", root).forEach((section) => {
+      let visible = 0;
+      qsa(".list-item", section).forEach((node) => {
+        const hit = node.dataset.title.includes(needle);
+        node.style.display = hit ? "" : "none";
+        if (hit) visible += 1;
+      });
+      section.style.display = visible ? "" : "none";
     });
   });
   bindJobRows(root);
@@ -668,6 +725,13 @@ async function onClick(event) {
 
   if (action === "decision") {
     await sendDecision(trigger.dataset.job, trigger.dataset.decision, {}, trigger);
+    return;
+  }
+
+  if (action === "lib-sort") {
+    state.librarySort = trigger.dataset.sort;
+    localStorage.setItem("es-library-sort", state.librarySort);
+    await render();
     return;
   }
 

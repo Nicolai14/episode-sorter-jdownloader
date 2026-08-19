@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config
 from .api.routes import router
 from .core.scheduler import scheduler
-from .db import engine, session_scope
+from .db import engine, ensure_schema, session_scope
 from .core import library
 from .models import Base
 
@@ -29,6 +29,9 @@ WEB_DIR = Path(os.environ.get("ES_WEB_DIR", "/app/web"))
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(engine)
+    added = ensure_schema(Base)
+    if added:
+        logger.info("schema updated: %s", ", ".join(added))
     config.bootstrap()
     try:
         with session_scope() as session:

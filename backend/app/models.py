@@ -124,6 +124,8 @@ class LibraryItem(Base):
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     media_type: Mapped[str] = mapped_column(String(16))
     seasons: Mapped[Any] = mapped_column(JSON, default=list)
+    last_added: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    file_count: Mapped[int] = mapped_column(Integer, default=0)
     indexed_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
 
