@@ -1,0 +1,58 @@
+services:
+  episode-sorter:
+    build: .
+    image: episode-sorter:latest
+    container_name: episode-sorter
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      ES_DOWNLOAD_DIR: /downloads
+      ES_ANIME_PATH_1: /mnt/poolToshiba/Animes
+      ES_ANIME_PATH_2: /mnt/dataGrepDataset/Anime
+      ES_SERIES_PATH: /mnt/poolToshiba/Serien
+      ES_MOVIES_PATH: /mnt/poolToshiba/Filme
+      ES_DEFAULT_ANIME_PATH: /mnt/poolToshiba/Animes
+      ES_DRY_RUN: ${ES_DRY_RUN:-true}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+      JD_EMAIL: ${JD_EMAIL:-}
+      JD_PASSWORD: ${JD_PASSWORD:-}
+      JD_DEVICE: ${JD_DEVICE:-}
+    volumes:
+      - ./data:/data
+      - ${DOWNLOAD_DIR:-/mnt/poolToshiba/Downloads}:/downloads
+      # The library paths are mounted under the same paths as on the host so the
+      # settings in the dashboard match what TrueNAS shows.
+      - /mnt/poolToshiba/Animes:/mnt/poolToshiba/Animes
+      - /mnt/dataGrepDataset/Anime:/mnt/dataGrepDataset/Anime
+      - /mnt/poolToshiba/Serien:/mnt/poolToshiba/Serien
+      - /mnt/poolToshiba/Filme:/mnt/poolToshiba/Filme
+    ports:
+      - "8080:8080"
+
+  jdownloader:
+    image: jlesage/jdownloader-2:latest
+    container_name: jdownloader
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      USER_ID: ${PUID:-0}
+      GROUP_ID: ${PGID:-0}
+      KEEP_APP_RUNNING: "1"
+      MYJDOWNLOADER_EMAIL: ${JD_EMAIL:-}
+      MYJDOWNLOADER_PASSWORD: ${JD_PASSWORD:-}
+      MYJDOWNLOADER_DEVICE_NAME: ${JD_DEVICE:-truenas}
+    volumes:
+      - ./jdownloader-config:/config
+      - ${DOWNLOAD_DIR:-/mnt/poolToshiba/Downloads}:/output
+    ports:
+      - "5800:5800"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-episode-sorter
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - episode-sorter

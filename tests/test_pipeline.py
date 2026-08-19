@@ -1,0 +1,152 @@
+from pathlib import Path
+
+import pytest
+
+from app import config  # noqa: F401
+from app.core import library, metadata, pipeline
+from app.models import Job
+
+
+def _candidate(title="Attack on Titan", year=2013, source="anilist"):
+    return metadata.Candidate(
+        source=source,
+        external_id=16498,
+        media_type="anime" if source == "anilist" else "series",
+        title=title,
+        original_title="進撃の巨人",
+        english_title=title,
+        year=year,
+        score=0.98,
+        episodes=25,
+        alt_titles=[title, "Shingeki no Kyojin"],
+    )
+
+
+@pytest.fixture
+def stub_metadata(monkeypatch):
+    monkeypatch.setattr(metadata, "lookup", lambda title, hint, year=None: ([_candidate()], []))
+    monkeypatch.setattr(pipeline.metadata, "lookup", lambda title, hint, year=None: ([_candidate()], []))
+    monkeypatch.setattr(pipeline.metadata, "tmdb_season_plausible", lambda *args: (True, None))
+
+
+def _make_file(path: Path, size: int = 4096) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x" * size)
+    return path
+
+
+def _run(session, times=3):
+    for _ in range(times):
+        pipeline.tick(session)
+        session.flush()
+
+
+def test_existing_folder_wins_over_default_path(session, library_tree, stub_metadata):
+    existing = library_tree["anime_two"] / "Attack on Titan (2013)"
+    (existing / "Season 01").mkdir(parents=True)
+    library.reindex(session)
+
+    source = _make_file(
+        library_tree["downloads"] / "Attack.On.Titan.S02.GERMAN" / "Attack.On.Titan.WEBX.1080pS02E01.mkv"
+    )
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.media_type == "anime"
+    assert job.status == "planned"  # dry run
+    assert job.target_path == str(existing / "Season 02" / "Attack on Titan (2013) - S02E01.mkv")
+    assert source.exists(), "dry run must not move anything"
+
+
+def test_new_anime_uses_default_path(session, library_tree, stub_metadata):
+    library.reindex(session)
+    _make_file(library_tree["downloads"] / "Attack.On.Titan.S02E02.1080p.mkv")
+    _run(session)
+
+    job = session.scalars(
+        pipeline.select(Job).where(Job.filename == "Attack.On.Titan.S02E02.1080p.mkv")
+    ).one()
+    assert job.target_path.startswith(str(library_tree["anime_one"]))
+
+
+def test_move_and_subtitles(session, library_tree, stub_metadata, set_config):
+    library.reindex(session)
+    folder = library_tree["downloads"] / "AoT.S02E03"
+    source = _make_file(folder / "Attack.On.Titan.S02E03.1080p.mkv")
+    _make_file(folder / "Attack.On.Titan.S02E03.1080p.de.srt", 64)
+    _make_file(folder / "sample.mkv", 32)
+    set_config({"dry_run": False})
+    try:
+        _run(session)
+    finally:
+        set_config({"dry_run": True})
+
+    job = session.scalars(pipeline.select(Job).where(Job.filename == source.name)).one()
+    assert job.status == "done", job.error
+    target = Path(job.target_path)
+    assert target.exists()
+    assert not source.exists()
+    assert (target.parent / "Attack on Titan (2013) - S02E03.de.srt").exists()
+
+
+def test_duplicate_is_never_overwritten(session, library_tree, stub_metadata, set_config):
+    library.reindex(session)
+    existing_dir = library_tree["anime_one"] / "Attack on Titan (2013)" / "Season 02"
+    existing_dir.mkdir(parents=True)
+    (existing_dir / "Attack on Titan (2013) - S02E04.mkv").write_bytes(b"old")
+    library.reindex(session)
+
+    source = _make_file(library_tree["downloads"] / "Attack.On.Titan.S02E04.1080p.mkv")
+    set_config({"dry_run": False})
+    try:
+        _run(session)
+    finally:
+        set_config({"dry_run": True})
+
+    job = session.scalars(pipeline.select(Job).where(Job.filename == source.name)).one()
+    assert job.status == "duplicate"
+    assert job.duplicate_of
+    assert source.exists()
+    assert (existing_dir / "Attack on Titan (2013) - S02E04.mkv").read_bytes() == b"old"
+
+
+def test_absolute_episode_goes_to_review(session, library_tree, stub_metadata):
+    library.reindex(session)
+    _make_file(library_tree["downloads"] / "[SubsPlease] Attack On Titan - 87 (1080p).mkv")
+    _run(session)
+    job = session.scalars(
+        pipeline.select(Job).where(Job.filename.like("%Attack On Titan - 87%"))
+    ).one()
+    assert job.status == "review"
+    assert "absolute" in (job.reason or "")
+
+
+def test_decision_approve_moves_file(session, library_tree, stub_metadata, set_config):
+    library.reindex(session)
+    source = _make_file(library_tree["downloads"] / "[SubsPlease] Attack On Titan - 88 (1080p).mkv")
+    _run(session)
+    job = session.scalars(pipeline.select(Job).where(Job.filename == source.name)).one()
+    assert job.status == "review"
+
+    set_config({"dry_run": False})
+    try:
+        pipeline.apply_decision(
+            session, job, "approve", {"season": 4, "episode": 28, "save_rule": True}
+        )
+    finally:
+        set_config({"dry_run": True})
+    assert job.status == "done", job.error
+    assert Path(job.target_path).name == "Attack on Titan (2013) - S04E28.mkv"
+    assert not source.exists()
+
+
+def test_waiting_while_extraction_runs(session, library_tree, stub_metadata):
+    library.reindex(session)
+    folder = library_tree["downloads"] / "Some.Show.S01E01"
+    source = _make_file(folder / "Some.Show.S01E01.1080p.mkv")
+    (folder / "Some.Show.S01E01.part01.rar").write_bytes(b"archive")
+    pipeline.tick(session)
+    session.flush()
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.status == "waiting"
+    assert "unpack" in job.reason or "writing" in job.reason
