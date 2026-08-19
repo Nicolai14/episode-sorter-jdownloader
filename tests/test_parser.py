@@ -67,3 +67,17 @@ def test_title_key_normalisation():
 def test_title_falls_back_to_folder():
     result = parse("01.mkv", folder_name="Attack.on.Titan.S02.German.1080p.WEB")
     assert result.title == "Attack on Titan"
+
+
+def test_release_style_folder_names_are_understood():
+    from app.core.library import folder_title
+
+    assert folder_title("3.Idiots.2009.German.AC3D.DL.720p.BluRay.x264-Pate") == ("3 Idiots", 2009)
+    assert folder_title("28.Years.Later.The.Bone.Temple.2026.German.EAC3.DL.2160p.WEB.h265-VECTOR") == (
+        "28 Years Later The Bone Temple",
+        2026,
+    )
+    # Plain library folders stay untouched
+    assert folder_title("Attack on Titan (2013)") == ("Attack on Titan", 2013)
+    assert folder_title("Akame Ga Kill") == ("Akame Ga Kill", None)
+    assert folder_title("Dr. Stone") == ("Dr. Stone", None)

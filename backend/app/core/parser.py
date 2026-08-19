@@ -78,6 +78,8 @@ _YEAR_BARE = re.compile(r"(?<![\d])(?P<y>19\d{2}|20\d{2})(?![\dp])")
 _GROUP_LEADING = re.compile(r"^[\[\{\(](?P<g>[^\]\}\)]{1,40})[\]\}\)]\s*")
 _GROUP_TRAILING = re.compile(r"-(?P<g>[A-Za-z0-9]{2,20})$")
 _BRACKETS = re.compile(r"[\[\{\(][^\]\}\)]*[\]\}\)]")
+# Audio and codec tags with digits glued on: AC3D, EAC3D, DD51, DDP51, AAC2, H265
+_TECH_VARIANT = re.compile(r"(?i)^(?:ac3|eac3|dts|dd|ddp|aac|mp3|flac|truehd|atmos|opus)[0-9]*d?$|^[hx]\.?26[45]$|^\d+bit$")
 
 
 @dataclass
@@ -164,7 +166,7 @@ def _clean_title_tokens(fragment: str) -> str:
         low = token.lower().strip("-.")
         if not low:
             continue
-        if low in TECH_TOKENS or low in GROUP_HINTS:
+        if low in TECH_TOKENS or low in GROUP_HINTS or _TECH_VARIANT.match(low):
             continue
         if re.fullmatch(r"(19|20)\d{2}", low):
             continue

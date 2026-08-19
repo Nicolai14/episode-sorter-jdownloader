@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from .. import config
 from ..models import LibraryItem, utcnow
 from .metadata import similarity
-from .parser import title_key
+from .parser import TECH_TOKENS, parse as parse_release, title_key
 
 _FOLDER_YEAR = re.compile(r"^(?P<name>.+?)[\s._]*[\(\[](?P<year>19\d{2}|20\d{2})[\)\]]\s*$")
 _SEASON_DIR = re.compile(r"(?i)^(?:season|staffel|s)[\s._-]*(?P<n>\d{1,3})$")
@@ -32,6 +32,22 @@ def split_folder_name(folder_name: str) -> tuple[str, int | None]:
     if match:
         return match.group("name").strip(" .-_"), int(match.group("year"))
     return folder_name.strip(" .-_"), None
+
+
+def _looks_like_release(folder_name: str) -> bool:
+    """Folders named after the release, e.g. 3.Idiots.2009.German.720p.BluRay.x264-Pate."""
+    tokens = {token.lower() for token in re.split(r"[^A-Za-z0-9]+", folder_name) if token}
+    return bool(tokens & TECH_TOKENS)
+
+
+def folder_title(folder_name: str) -> tuple[str, int | None]:
+    """Title and year of a library folder, release names included."""
+    title, year = split_folder_name(folder_name)
+    if _looks_like_release(folder_name):
+        parsed = parse_release(folder_name)
+        if parsed.title and len(parsed.title) >= 2:
+            return parsed.title, parsed.year or year
+    return title, year
 
 
 def _seasons_in(path: Path) -> list[int]:
@@ -81,7 +97,7 @@ def reindex(session: Session) -> dict[str, int]:
         for entry in entries:
             if not entry.is_dir() or entry.name.startswith(".") or entry.name.lower() in _SKIP_DIRS:
                 continue
-            title, year = split_folder_name(entry.name)
+            title, year = folder_title(entry.name)
             session.add(
                 LibraryItem(
                     root=root,
