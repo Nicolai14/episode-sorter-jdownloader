@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config
@@ -59,9 +59,25 @@ def healthz() -> JSONResponse:
     return JSONResponse({"status": "ok", "dry_run": bool(config.get("dry_run", True))})
 
 
+def asset_version() -> str:
+    """Newest asset timestamp, appended to the asset URLs so browsers never serve
+    a stale dashboard after an update."""
+    newest = 0.0
+    for path in (WEB_DIR / "assets").glob("*"):
+        try:
+            newest = max(newest, path.stat().st_mtime)
+        except OSError:
+            continue
+    return str(int(newest))
+
+
 if WEB_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=WEB_DIR / "assets"), name="assets")
 
     @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html")
+    def index() -> HTMLResponse:
+        version = asset_version()
+        html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+        html = html.replace("/assets/style.css", f"/assets/style.css?v={version}")
+        html = html.replace("/assets/app.js", f"/assets/app.js?v={version}")
+        return HTMLResponse(html, headers={"Cache-Control": "no-store, must-revalidate"})
