@@ -53,7 +53,16 @@ h3 { font-size: 0.94rem; }
 p { margin: 0; }
 a { color: var(--accent); }
 
-.shell { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); min-height: 100dvh; }
+.shell { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); min-height: 100dvh; position: relative; }
+/* Keeps the rail column filled on pages that scroll far past one viewport. */
+.shell::before {
+  content: "";
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--rail);
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--line-soft);
+}
 
 /* ---------------------------------------------------------------- rail */
 
@@ -62,11 +71,10 @@ a { color: var(--accent); }
   flex-direction: column;
   gap: 20px;
   padding: 20px 14px;
-  background: var(--bg-sunken);
-  border-right: 1px solid var(--line-soft);
   position: sticky;
   top: 0;
   height: 100dvh;
+  z-index: 1;
 }
 
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; }
@@ -405,7 +413,8 @@ textarea { min-height: 56px; resize: vertical; }
 
 @media (max-width: 900px) {
   .shell { grid-template-columns: 1fr; }
-  .rail { position: static; height: auto; flex-direction: row; align-items: center; gap: 12px; overflow-x: auto; }
+  .shell::before { display: none; }
+  .rail { position: static; height: auto; background: var(--bg-sunken); border-bottom: 1px solid var(--line-soft); flex-direction: row; align-items: center; gap: 12px; overflow-x: auto; }
   #nav { flex-direction: row; }
   .rail-foot { display: none; }
   .row { grid-template-columns: minmax(0, 1fr); }
