@@ -55,6 +55,33 @@ Dashboard: `http://<truenas-ip>:8080`, über cloudflared zusätzlich unter `medi
 Der Container startet im **Dry Run**. Es wird nichts verschoben, nur geplant. Erst wenn genügend echte
 Downloads richtig geplant wurden, den Schalter oben rechts im Dashboard umlegen.
 
+## Betrieb auf dem TrueNAS
+
+Der Stack liegt unter `/mnt/AppPool/DockerStacks/episode-sorter` und läuft als Docker Compose
+Projekt neben den bestehenden Apps.
+
+| Was | Wert |
+| --- | --- |
+| Dashboard intern | `http://192.168.178.58:18080` |
+| Dashboard extern | `https://media.truenasserver.com` (Cloudflare Access) |
+| JDownloader intern | `http://192.168.178.58:5800` |
+| JDownloader extern | `https://jd.truenasserver.com` (Cloudflare Access) und `my.jdownloader.org` |
+| Downloadordner | `/mnt/SmallPool/dataGrepDataset/Downloads/JDownloader` |
+| Container-Nutzer | `3000:0` (smb), damit verschobene Dateien über SMB nutzbar bleiben |
+
+Der Cloudflare-Tunnel läuft als eigene TrueNAS-App (`truenas-claude`), deshalb bleibt der
+cloudflared-Service in der Compose-Datei hinter dem Profil `tunnel` und startet hier nicht mit.
+
+Beide Hostnamen liegen hinter Cloudflare Access. Ohne Anmeldung kommt niemand an ein Dashboard,
+das Dateien verschieben und löschen kann.
+
+```bash
+ssh nas
+cd /mnt/AppPool/DockerStacks/episode-sorter
+git pull && sudo docker compose build episode-sorter && sudo docker compose up -d
+sudo docker compose logs -f --tail 50 episode-sorter
+```
+
 ## Konfiguration
 
 Alles lässt sich im Dashboard unter *Einstellungen* ändern, die Werte liegen in der SQLite-Datenbank.
