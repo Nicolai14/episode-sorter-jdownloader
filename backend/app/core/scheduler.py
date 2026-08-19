@@ -49,7 +49,7 @@ class Scheduler:
                 result = {"error": str(exc)}
                 try:
                     with session_scope() as session:
-                        pipeline.log(session, f"pipeline error: {exc}", level="error", source="scheduler")
+                        pipeline.log(session, f"Fehler im Ablauf: {exc}", level="error", source="scheduler")
                 except Exception:  # noqa: BLE001
                     pass
             finally:

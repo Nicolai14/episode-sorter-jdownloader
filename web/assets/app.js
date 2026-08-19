@@ -223,8 +223,8 @@ function jobRow(job) {
       </div>
       <div class="path">${target}</div>
       <div>${chip(job.status)}<div class="row-sub">${relTime(job.updated_at)}</div></div>
+      <div class="row-meter">${meter(job.confidence)}</div>
       <div class="row-actions">
-        ${meter(job.confidence)}
         <button class="btn btn-small" data-action="toggle" data-job="${job.id}">${state.openJob === job.id ? "Schließen" : "Details"}</button>
       </div>
       ${state.openJob === job.id ? jobDetail(job) : ""}
@@ -887,8 +887,13 @@ const RENDERERS = {
   settings: renderSettings,
 };
 
-async function render() {
+async function render({ entering = false } = {}) {
   const root = qs("#view");
+  if (entering) {
+    root.classList.remove("is-entering");
+    void root.offsetWidth; // restart the animation
+    root.classList.add("is-entering");
+  }
   const meta = VIEWS[state.view];
   qs("#viewTitle").textContent = meta.title;
   qs("#viewHint").textContent = meta.hint;
@@ -909,10 +914,21 @@ function setView(view) {
   const root = qs("#view");
   delete root.dataset.loaded;
   location.hash = view;
-  render();
+  render({ entering: true });
+}
+
+function watchScroll() {
+  const sentinel = qs("#scrollSentinel");
+  const topbar = qs(".topbar");
+  if (!sentinel || !("IntersectionObserver" in window)) return;
+  new IntersectionObserver(
+    ([entry]) => topbar.classList.toggle("is-stuck", !entry.isIntersecting),
+    { threshold: 1 },
+  ).observe(sentinel);
 }
 
 function boot() {
+  watchScroll();
   qs("#nav").addEventListener("click", (event) => {
     const button = event.target.closest(".nav-item");
     if (button) setView(button.dataset.view);
@@ -949,7 +965,7 @@ function boot() {
   if (VIEWS[initial]) state.view = initial;
   qsa(".nav-item").forEach((item) => item.classList.toggle("is-active", item.dataset.view === state.view));
 
-  refreshStatus().then(render);
+  refreshStatus().then(() => render({ entering: true }));
   state.timer = setInterval(async () => {
     if (document.hidden) return;
     await refreshStatus();
