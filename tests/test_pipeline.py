@@ -118,7 +118,7 @@ def test_absolute_episode_goes_to_review(session, library_tree, stub_metadata):
         pipeline.select(Job).where(Job.filename.like("%Attack On Titan - 87%"))
     ).one()
     assert job.status == "review"
-    assert "absolute" in (job.reason or "")
+    assert "Absolute Folgennummer" in (job.reason or "")
 
 
 def test_decision_approve_moves_file(session, library_tree, stub_metadata, set_config):
@@ -149,7 +149,7 @@ def test_waiting_while_extraction_runs(session, library_tree, stub_metadata):
     session.flush()
     job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
     assert job.status == "waiting"
-    assert "unpack" in job.reason or "writing" in job.reason
+    assert "entpackt" in job.reason or "wächst" in job.reason
 
 
 def test_generic_title_prefers_tmdb_for_series(session, library_tree, monkeypatch):
@@ -201,7 +201,7 @@ def test_equal_scores_across_media_types_go_to_review(session, library_tree, mon
 
     job = session.scalars(pipeline.select(Job).where(Job.filename.like("Nowhere%"))).one()
     assert job.status == "review"
-    assert "match equally well" in job.reason
+    assert "passen gleich gut" in job.reason
 
 
 def test_second_series_root_is_indexed_and_wins(session, library_tree, stub_metadata, set_config):

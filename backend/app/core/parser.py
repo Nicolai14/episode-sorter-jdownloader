@@ -318,7 +318,7 @@ def parse(name: str, folder_name: str | None = None, path_hint: str | None = Non
         if folder_parsed.title:
             title = folder_parsed.title
             result.year = result.year or folder_parsed.year
-            result.notes.append("title taken from folder name")
+            result.notes.append("Titel aus dem Ordnernamen übernommen")
             if result.season is None:
                 result.season = folder_parsed.season
     result.title = title

@@ -109,7 +109,7 @@ def tmdb_available() -> bool:
 def _tmdb_request(path: str, params: dict[str, Any]) -> dict[str, Any]:
     api_key = str(config.get("tmdb_api_key") or "").strip()
     if not api_key:
-        raise MetadataError("TMDb API key is not configured")
+        raise MetadataError("Kein TMDb-Schlüssel hinterlegt")
     headers: dict[str, str] = {}
     if api_key.startswith("eyJ"):
         # v4 read access token goes into the header, the v3 key into the query string
@@ -122,7 +122,7 @@ def _tmdb_request(path: str, params: dict[str, Any]) -> dict[str, Any]:
         return cached
     response = requests.get(f"{TMDB_BASE}{path}", params=params, headers=headers, timeout=TIMEOUT)
     if response.status_code == 401:
-        raise MetadataError("TMDb rejected the API key")
+        raise MetadataError("TMDb hat den Schlüssel abgelehnt")
     response.raise_for_status()
     payload = response.json()
     _cache_put(cache_key, payload)
@@ -192,18 +192,18 @@ def tmdb_season_plausible(tmdb_id: int, season: int, episode: int | None) -> tup
     try:
         details = tmdb_details(tmdb_id, "series")
     except Exception as exc:  # network or key issues must not block the pipeline
-        return True, f"TMDb check skipped: {exc}"
+        return True, f"TMDb-Prüfung übersprungen: {exc}"
     seasons = details.get("seasons") or []
     numbers = {int(entry.get("season_number", -1)) for entry in seasons}
     if season not in numbers:
-        return False, f"season {season} is unknown on TMDb (known: {sorted(numbers)})"
+        return False, f"Staffel {season} kennt TMDb nicht (bekannt: {sorted(numbers)})"
     if episode is None:
         return True, None
     for entry in seasons:
         if int(entry.get("season_number", -1)) == season:
             count = int(entry.get("episode_count") or 0)
             if count and episode > count:
-                return False, f"episode {episode} is above the {count} episodes TMDb lists for season {season}"
+                return False, f"Folge {episode} liegt über den {count} Folgen, die TMDb für Staffel {season} führt"
     return True, None
 
 
@@ -240,7 +240,7 @@ def anilist_search(query: str, year: int | None = None) -> list[Candidate]:
             timeout=TIMEOUT,
         )
         if response.status_code == 429:
-            raise MetadataError("AniList rate limit reached")
+            raise MetadataError("AniList-Limit erreicht, bitte später erneut")
         response.raise_for_status()
         payload = response.json()
         _cache_put(cache_key, payload)
@@ -289,9 +289,9 @@ def lookup(title: str, media_hint: str, year: int | None = None) -> tuple[list[C
         except MetadataError as exc:
             notes.append(str(exc))
         except requests.RequestException as exc:
-            notes.append(f"{fn.__name__} failed: {exc}")
+            notes.append(f"{fn.__name__} fehlgeschlagen: {exc}")
         except Exception as exc:  # noqa: BLE001 - metadata lookups must never kill the pipeline
-            notes.append(f"{fn.__name__} error: {exc}")
+            notes.append(f"Fehler in {fn.__name__}: {exc}")
         return []
 
     if media_hint in {"anime", "unknown", "series"}:
@@ -302,7 +302,7 @@ def lookup(title: str, media_hint: str, year: int | None = None) -> tuple[list[C
         if media_hint in {"series", "anime", "unknown"}:
             results += _try(tmdb_search, title, "tv", year)
     elif media_hint in {"movie", "series"}:
-        notes.append("TMDb API key missing")
+        notes.append("Kein TMDb-Schlüssel hinterlegt")
 
     preferred = {"anime": "anilist", "series": "tmdb", "movie": "tmdb"}.get(media_hint)
     if preferred:

@@ -160,7 +160,7 @@ def list_jobs(
 def get_job(job_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
     job = session.get(Job, job_id)
     if job is None:
-        raise HTTPException(404, "job not found")
+        raise HTTPException(404, "Job nicht gefunden")
     events = list(
         session.scalars(select(Event).where(Event.job_id == job_id).order_by(desc(Event.ts)).limit(50))
     )
@@ -175,7 +175,7 @@ def get_job(job_id: int, session: Session = Depends(get_session)) -> dict[str, A
 def decide(job_id: int, body: DecisionIn, session: Session = Depends(get_session)) -> dict[str, Any]:
     job = session.get(Job, job_id)
     if job is None:
-        raise HTTPException(404, "job not found")
+        raise HTTPException(404, "Job nicht gefunden")
     try:
         pipeline.apply_decision(session, job, body.action, body.payload)
     except ValueError as exc:
@@ -188,7 +188,7 @@ def decide(job_id: int, body: DecisionIn, session: Session = Depends(get_session
 def reanalyze(job_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
     job = session.get(Job, job_id)
     if job is None:
-        raise HTTPException(404, "job not found")
+        raise HTTPException(404, "Job nicht gefunden")
     pipeline.analyze(session, job)
     session.flush()
     return job_dict(job)
@@ -214,7 +214,7 @@ def bulk(body: DecisionIn, ids: list[int] = Query(default=[]), session: Session 
 def delete_job(job_id: int, session: Session = Depends(get_session)) -> dict[str, str]:
     job = session.get(Job, job_id)
     if job is None:
-        raise HTTPException(404, "job not found")
+        raise HTTPException(404, "Job nicht gefunden")
     session.delete(job)
     return {"status": "deleted"}
 
@@ -312,7 +312,7 @@ def get_library(
 @router.post("/library/reindex")
 def reindex_library(session: Session = Depends(get_session)) -> dict[str, Any]:
     stats = library.reindex(session)
-    pipeline.log(session, f"library reindexed: {stats}", source="library")
+    pipeline.log(session, f"Bibliothek neu eingelesen: {stats}", source="library")
     return {"roots": stats}
 
 
@@ -324,7 +324,7 @@ def browse(path: str | None = None) -> dict[str, Any]:
         return {"path": None, "parent": None, "dirs": entries}
     target = Path(path)
     if not target.is_dir():
-        raise HTTPException(400, "not a directory")
+        raise HTTPException(400, "Kein Ordner")
     dirs = []
     try:
         for entry in sorted(os.scandir(target), key=lambda e: e.name.lower()):
@@ -374,7 +374,7 @@ def create_rule(body: RuleIn, session: Session = Depends(get_session)) -> dict[s
 def delete_rule(rule_id: int, session: Session = Depends(get_session)) -> dict[str, str]:
     rule = session.get(Rule, rule_id)
     if rule is None:
-        raise HTTPException(404, "rule not found")
+        raise HTTPException(404, "Regel nicht gefunden")
     session.delete(rule)
     return {"status": "deleted"}
 

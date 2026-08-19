@@ -63,7 +63,7 @@ def scan_downloads(session: Session) -> int:
     root_value = config.get("download_dir")
     root = Path(root_value)
     if not root.is_dir():
-        log(session, f"download folder not found: {root_value}", level="error", source="watcher")
+        log(session, f"Downloadordner nicht gefunden: {root_value}", level="error", source="watcher")
         return 0
 
     known = {row for row in session.scalars(select(Job.source_path))}
@@ -90,12 +90,12 @@ def scan_downloads(session: Session) -> int:
                 size_bytes=size,
                 last_size=size,
                 status="waiting",
-                reason="waiting for the download and the unpacking to finish",
+                reason="Wartet auf Download und Entpacken",
                 dry_run=bool(config.get("dry_run", True)),
             )
             session.add(job)
             session.flush()
-            log(session, f"new file discovered: {path.name}", source="watcher", job_id=job.id)
+            log(session, f"Neue Datei entdeckt: {path.name}", source="watcher", job_id=job.id)
             created += 1
     return created
 
@@ -108,11 +108,11 @@ def check_waiting(session: Session) -> int:
         path = Path(job.source_path)
         if not path.exists():
             job.status = "failed"
-            job.error = "the source file disappeared before it could be sorted"
+            job.error = "Die Quelldatei ist verschwunden, bevor sie einsortiert werden konnte"
             log(session, job.error, level="warn", job_id=job.id)
             continue
         if files.extraction_in_progress(path.parent):
-            job.reason = "JDownloader is still writing or unpacking this folder"
+            job.reason = "JDownloader schreibt oder entpackt in diesem Ordner noch"
             job.stable_checks = 0
             continue
         stable, size = files.is_stable(path, job.last_size)
@@ -122,10 +122,10 @@ def check_waiting(session: Session) -> int:
             job.stable_checks += 1
         else:
             job.stable_checks = 0
-            job.reason = "the file is still growing"
+            job.reason = "Die Datei wächst noch"
         if job.stable_checks >= needed:
             job.status = "analyzing"
-            job.reason = "ready for analysis"
+            job.reason = "Bereit für die Prüfung"
             promoted += 1
     return promoted
 
@@ -171,7 +171,7 @@ def _anime_crosscheck(
             continue
         if year and candidate.year and abs(year - candidate.year) > 1:
             continue
-        return "anime", f"AniList knows this title ({candidate.title}), treated as anime"
+        return "anime", f"AniList kennt diesen Titel ({candidate.title}), wird als Anime behandelt"
     return media_type, None
 
 
@@ -202,7 +202,7 @@ def analyze(session: Session, job: Job) -> Job:
     path = Path(job.source_path)
     if not path.exists():
         job.status = "failed"
-        job.error = "the source file disappeared"
+        job.error = "Die Quelldatei ist verschwunden"
         return job
 
     parsed = parse(job.filename, folder_name=path.parent.name, path_hint=str(path.parent))
@@ -224,7 +224,7 @@ def analyze(session: Session, job: Job) -> Job:
 
     if rule:
         rule.hits += 1
-        notes.append(f"rule #{rule.id} applied ({rule.title})")
+        notes.append(f"Regel #{rule.id} angewendet ({rule.title})")
         job.title = rule.title
         job.year = rule.year or parsed.year
         job.tmdb_id = rule.tmdb_id
@@ -233,7 +233,7 @@ def analyze(session: Session, job: Job) -> Job:
     else:
         query = parsed.title
         if not query:
-            blockers.append("no title could be read from the filename")
+            blockers.append("Aus dem Dateinamen ließ sich kein Titel lesen")
             media_type = parsed.media_hint
         else:
             candidates, lookup_notes = metadata.lookup(query, parsed.media_hint, parsed.year)
@@ -254,13 +254,13 @@ def analyze(session: Session, job: Job) -> Job:
                     )
                 ):
                     blockers.append(
-                        f"two results match equally well: {best.title} ({best.year}, {best.media_type}) and "
+                        f"Zwei Treffer passen gleich gut: {best.title} ({best.year}, {best.media_type}) und "
                         f"{runner_up.title} ({runner_up.year}, {runner_up.media_type})"
                     )
                 if best.score < 0.55:
-                    blockers.append(f"the best metadata match is weak: {best.title} at {int(best.score * 100)}%")
+                    blockers.append(f"Schwacher Metadatentreffer: {best.title} mit {int(best.score * 100)} Prozent")
             else:
-                blockers.append("no metadata was found for this title")
+                blockers.append("Zu diesem Titel wurden keine Metadaten gefunden")
         media_type = _pick_media_type(parsed, best, None)
         job.title = (best.english_title or best.title) if best else parsed.title
         job.year = (best.year if best and best.year else parsed.year)
@@ -274,16 +274,16 @@ def analyze(session: Session, job: Job) -> Job:
     job.media_type = media_type
 
     if media_type == "unknown":
-        blockers.append("the media type is unclear")
+        blockers.append("Die Medienart ist unklar")
     if parsed.absolute_episode is not None and parsed.season is None:
-        blockers.append(f"absolute episode number {parsed.absolute_episode} needs a season")
+        blockers.append(f"Absolute Folgennummer {parsed.absolute_episode} braucht eine Staffel")
     if media_type in {"series", "anime"} and parsed.episode is None and parsed.absolute_episode is None:
-        blockers.append("no episode number in the filename (looks like a season pack)")
+        blockers.append("Keine Folgennummer im Dateinamen, sieht nach Staffelpaket aus")
     if parsed.special_kind:
-        blockers.append(f"special content ({parsed.special_kind}) needs a manual target")
+        blockers.append(f"Sonderinhalt ({parsed.special_kind}) braucht ein manuelles Ziel")
     siblings = _package_video_count(session, job)
     if siblings > 1:
-        notes.append(f"{siblings} video files are queued from this package")
+        notes.append(f"{siblings} Videodateien aus diesem Paket stehen an")
 
     if job.tmdb_id and media_type in {"series", "anime"} and parsed.season is not None:
         plausible, message = metadata.tmdb_season_plausible(job.tmdb_id, parsed.season, parsed.episode)
@@ -300,7 +300,7 @@ def analyze(session: Session, job: Job) -> Job:
     existing_folder = None
     if rule and rule.target_dir:
         existing_folder = rule.target_dir
-        notes.append(f"rule target: {rule.target_dir}")
+        notes.append(f"Ziel aus Regel: {rule.target_dir}")
     elif folder_match:
         existing_folder = folder_match.item.path
         notes.append(f"{folder_match.reason}: {folder_match.item.path}")
@@ -342,9 +342,9 @@ def analyze(session: Session, job: Job) -> Job:
             "incoming": mediainfo.probe(path),
         }
         job.status = "duplicate"
-        job.reason = "this episode already exists in the library"
+        job.reason = "Diese Folge liegt schon in der Bibliothek"
         job.confidence = _confidence(parsed, best, folder_match, blockers)
-        log(session, f"duplicate found for {job.filename}", level="warn", job_id=job.id)
+        log(session, f"Dublette gefunden für {job.filename}", level="warn", job_id=job.id)
         return job
 
     job.confidence = _confidence(parsed, best, folder_match, blockers)
@@ -355,10 +355,10 @@ def analyze(session: Session, job: Job) -> Job:
         job.reason = "; ".join(blockers)
     elif job.confidence < threshold:
         job.status = "review"
-        job.reason = f"confidence {job.confidence:.0f}% is below the threshold of {threshold:.0f}%"
+        job.reason = f"Sicherheit {job.confidence:.0f} Prozent liegt unter der Schwelle von {threshold:.0f} Prozent"
     else:
         job.status = "ready"
-        job.reason = "; ".join(notes) or "ready to move"
+        job.reason = "; ".join(notes) or "Bereit zum Verschieben"
     if notes and job.status != "ready":
         job.reason = f"{job.reason} | {'; '.join(notes)}"
     return job
@@ -388,14 +388,14 @@ def execute(session: Session, job: Job, *, replace_existing: bool = False) -> Jo
     target = Path(job.target_path or "")
     if not job.target_path:
         job.status = "review"
-        job.reason = "no target path has been planned yet"
+        job.reason = "Es wurde noch kein Ziel geplant"
         return job
 
     if bool(config.get("dry_run", True)):
         job.status = "planned"
         job.dry_run = True
-        job.reason = "dry run: nothing was moved"
-        log(session, f"dry run plan: {source.name} -> {job.target_path}", job_id=job.id)
+        job.reason = "Dry Run, es wurde nichts verschoben"
+        log(session, f"Dry Run geplant: {source.name} -> {job.target_path}", job_id=job.id)
         return job
 
     job.status = "moving"
@@ -418,7 +418,7 @@ def execute(session: Session, job: Job, *, replace_existing: bool = False) -> Jo
         job.status = "failed"
         job.error = str(exc)
         job.next_attempt_at = utcnow() + dt.timedelta(minutes=10)
-        log(session, f"move failed for {job.filename}: {exc}", level="error", job_id=job.id)
+        log(session, f"Verschieben fehlgeschlagen für {job.filename}: {exc}", level="error", job_id=job.id)
         return job
 
     moved_companions: list[dict[str, str]] = []
@@ -441,9 +441,9 @@ def execute(session: Session, job: Job, *, replace_existing: bool = False) -> Jo
     job.status = "done"
     job.error = None
     job.finished_at = utcnow()
-    job.reason = f"moved via {result.method}, verified by {result.verified}"
+    job.reason = f"Verschoben per {result.method}, geprüft über {result.verified}"
     files.remove_empty_dirs(source.parent, Path(config.get("download_dir")))
-    log(session, f"moved {source.name} -> {result.target}", job_id=job.id)
+    log(session, f"Verschoben {source.name} -> {result.target}", job_id=job.id)
     return job
 
 
@@ -563,8 +563,8 @@ def apply_decision(session: Session, job: Job, action: str, payload: dict[str, A
 
     if action == "skip":
         job.status = "skipped"
-        job.reason = payload.get("reason") or "discarded in the dashboard"
-        log(session, f"skipped {job.filename}", job_id=job.id)
+        job.reason = payload.get("reason") or "Im Dashboard verworfen"
+        log(session, f"Verworfen: {job.filename}", job_id=job.id)
         return job
 
     if action == "retry":
@@ -576,7 +576,7 @@ def apply_decision(session: Session, job: Job, action: str, payload: dict[str, A
 
     if action == "defer":
         job.status = "review"
-        job.reason = "postponed in the dashboard"
+        job.reason = "Im Dashboard vertagt"
         return job
 
     if action == "select_candidate":
@@ -588,7 +588,7 @@ def apply_decision(session: Session, job: Job, action: str, payload: dict[str, A
                 chosen = candidate
                 break
         if chosen is None:
-            raise ValueError("candidate is not part of this job")
+            raise ValueError("Dieser Treffer gehört nicht zu diesem Job")
         job.title = chosen.get("english_title") or chosen.get("title")
         job.year = chosen.get("year") or job.year
         job.media_type = "anime" if chosen.get("source") == "anilist" else chosen.get("media_type")
@@ -614,7 +614,7 @@ def apply_decision(session: Session, job: Job, action: str, payload: dict[str, A
         if payload.get("save_rule"):
             rule = _save_rule(session, job)
             if rule is not None:
-                log(session, f"rule saved for {job.title}", job_id=job.id)
+                log(session, f"Regel gespeichert für {job.title}", job_id=job.id)
 
         if action == "approve":
             if Path(job.target_path).exists() and not payload.get("allow_overwrite"):
@@ -624,19 +624,19 @@ def apply_decision(session: Session, job: Job, action: str, payload: dict[str, A
                     "existing": mediainfo.probe(Path(job.target_path)),
                     "incoming": mediainfo.probe(Path(job.source_path)),
                 }
-                job.reason = "the planned target already exists"
+                job.reason = "Das geplante Ziel existiert bereits"
                 return job
             job.status = "ready"
-            job.reason = "approved in the dashboard"
+            job.reason = "Im Dashboard übernommen"
             job.error = None
             return execute(session, job)
         job.status = "review"
-        job.reason = "target updated, waiting for approval"
+        job.reason = "Ziel aktualisiert, wartet auf Bestätigung"
         return job
 
     if action == "duplicate_replace":
         job.status = "ready"
-        job.reason = "the existing file is being replaced"
+        job.reason = "Die vorhandene Datei wird ersetzt"
         return execute(session, job, replace_existing=True)
 
     if action == "duplicate_keep_both":
@@ -650,12 +650,12 @@ def apply_decision(session: Session, job: Job, action: str, payload: dict[str, A
         job.target_path = str(candidate)
         job.duplicate_of = None
         job.status = "ready"
-        job.reason = "kept next to the existing file"
+        job.reason = "Zusätzlich zur vorhandenen Datei behalten"
         return execute(session, job)
 
     if action == "duplicate_discard":
         job.status = "skipped"
-        job.reason = "new file discarded, the library copy stays"
+        job.reason = "Neue Datei verworfen, die Fassung in der Bibliothek bleibt"
         return job
 
-    raise ValueError(f"unknown action: {action}")
+    raise ValueError(f"Unbekannte Aktion: {action}")

@@ -12,7 +12,7 @@ def test_preflight_blocks_existing_target(tmp_path):
     target = tmp_path / "out.mkv"
     target.write_bytes(b"old")
     problems = mover.preflight(source, target)
-    assert any("already exists" in problem for problem in problems)
+    assert any("existiert bereits" in problem for problem in problems)
 
 
 def test_dry_run_leaves_everything_in_place(tmp_path):
@@ -20,7 +20,7 @@ def test_dry_run_leaves_everything_in_place(tmp_path):
     source.write_bytes(b"data")
     target = tmp_path / "library" / "out.mkv"
     result = mover.move(source, target, dry_run=True)
-    assert result.method == "dry-run"
+    assert result.method == "Dry Run"
     assert source.exists() and not target.exists()
 
 
@@ -32,7 +32,7 @@ def test_cross_dataset_copy_verifies_then_deletes(tmp_path, monkeypatch):
     source.write_bytes(payload)
     target = tmp_path / "library" / "Show" / "out.mkv"
     result = mover.move(source, target)
-    assert result.method == "copy+verify"
+    assert result.method == "Kopieren und Prüfen"
     assert target.read_bytes() == payload
     assert not source.exists()
     assert not list(target.parent.glob("*.es-part"))

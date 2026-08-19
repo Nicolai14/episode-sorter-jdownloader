@@ -186,7 +186,7 @@ def find_folder(
     exact = [item for item in items if item.title_key in wanted]
     if exact:
         best = _pick(exact, preferred_types, media_type, year)
-        return FolderMatch(item=best, score=1.0, reason="exact folder name match")
+        return FolderMatch(item=best, score=1.0, reason="Ordnername stimmt genau")
 
     best_item: LibraryItem | None = None
     best_score = 0.0
@@ -199,7 +199,7 @@ def find_folder(
         if score > best_score:
             best_item, best_score = item, score
     if best_item is not None and best_score >= threshold:
-        return FolderMatch(item=best_item, score=round(best_score, 3), reason="fuzzy folder name match")
+        return FolderMatch(item=best_item, score=round(best_score, 3), reason="Ordnername stimmt ungefähr")
     return None
 
 

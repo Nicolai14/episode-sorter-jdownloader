@@ -62,7 +62,7 @@ def build_plan(
     title_clean = sanitize(title)
     if existing_folder:
         directory = Path(existing_folder)
-        notes.append(f"existing folder reused: {existing_folder}")
+        notes.append(f"Vorhandener Ordner verwendet: {existing_folder}")
     else:
         directory = Path(base_dir) / folder_name(title_clean, year)
 
@@ -85,9 +85,9 @@ def build_plan(
         season_folder = _format(config.get("season_folder_template"), season=season_number)
     if season_folder_override:
         season_folder = season_folder_override
-        notes.append(f"existing season folder reused: {season_folder_override}")
+        notes.append(f"Vorhandener Staffelordner verwendet: {season_folder_override}")
     if season is None:
-        notes.append("no season in the filename, season 01 assumed")
+        notes.append("Keine Staffel im Dateinamen, Staffel 01 angenommen")
 
     values = {
         "title": title_clean,
