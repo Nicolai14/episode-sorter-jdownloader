@@ -34,7 +34,6 @@ DEFAULTS: dict[str, Any] = {
     "auto_threshold": 85,
     "scan_interval_seconds": 60,
     "stability_checks": 2,
-    "stability_interval_seconds": 30,
     "min_video_size_mb": 80,
     "video_extensions": [".mkv", ".mp4", ".avi", ".m4v", ".mov", ".ts", ".wmv"],
     "subtitle_extensions": [".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt"],
