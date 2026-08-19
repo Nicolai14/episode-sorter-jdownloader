@@ -443,6 +443,7 @@ function sortLibrary(items) {
 async function renderLibrary(root) {
   const payload = await api("/api/library?limit=2000");
   const items = payload.items;
+  const indexing = state.status && state.status.library_index && state.status.library_index.running;
   const groups = LIBRARY_GROUPS
     .map((group) => ({ ...group, items: sortLibrary(items.filter((item) => item.media_type === group.key)) }))
     .filter((group) => group.items.length);
@@ -456,6 +457,7 @@ async function renderLibrary(root) {
         </div>
         <div class="row-actions"><button class="btn" data-action="reindex">Neu einlesen</button></div>
       </div>
+      ${indexing ? '<div class="notice" data-tone="warn">Die Bibliothek wird gerade eingelesen. Die Liste ist noch nicht vollständig.</div>' : ""}
       <div class="toolbar">
         <div class="field">
           <label for="libSearch">Suche</label>

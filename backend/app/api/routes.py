@@ -120,6 +120,11 @@ def status(session: Session = Depends(get_session)) -> dict[str, Any]:
             "device": jdownloader.client.device_name,
             "error": jdownloader.client.last_error,
         },
+        "library_index": {
+            "running": library.INDEX_STATE["running"],
+            "finished_at": library.INDEX_STATE["finished_at"],
+            "error": library.INDEX_STATE["error"],
+        },
         "scheduler": {
             "running": scheduler.running,
             "last_run": scheduler.last_run,

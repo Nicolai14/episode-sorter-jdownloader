@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -33,12 +34,16 @@ async def lifespan(_: FastAPI):
     if added:
         logger.info("schema updated: %s", ", ".join(added))
     config.bootstrap()
-    try:
-        with session_scope() as session:
-            stats = library.reindex(session)
-        logger.info("library indexed: %s", stats)
-    except Exception as exc:  # noqa: BLE001 - a missing mount must not stop the app
-        logger.warning("library index failed: %s", exc)
+    # The first index walks every library folder. That must not block the port.
+    def _initial_index() -> None:
+        try:
+            with session_scope() as session:
+                stats = library.reindex(session)
+            logger.info("library indexed: %s", stats)
+        except Exception as exc:  # noqa: BLE001 - a missing mount must not stop the app
+            logger.warning("library index failed: %s", exc)
+
+    threading.Thread(target=_initial_index, name="episode-sorter-index", daemon=True).start()
     scheduler.start()
     logger.info("episode sorter started, dry run = %s", config.get("dry_run"))
     yield

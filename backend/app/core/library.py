@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -80,17 +81,23 @@ def find_season_folder(series_dir: str | None, season: int | None) -> str | None
     return season_folders(Path(series_dir)).get(season)
 
 
-def folder_activity(path: Path) -> tuple[dt.datetime | None, int]:
+INDEX_STATE: dict[str, Any] = {"running": False, "finished_at": None, "roots": {}, "error": None}
+
+
+def folder_activity(path: Path, max_depth: int = 2) -> tuple[dt.datetime | None, int]:
     """When something was last added to a folder, and how many video files it holds.
 
     Directory mtimes are enough: adding an episode touches the folder it lands in.
-    That keeps the index cheap even on a library with a few hundred entries.
+    The depth cap keeps a library with a few hundred titles at a few seconds.
     """
     newest = 0.0
     videos = 0
+    base_depth = len(path.parts)
     video_extensions = tuple(config.get("video_extensions"))
     for dirpath, dirnames, filenames in os.walk(path):
         dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+        if len(Path(dirpath).parts) - base_depth >= max_depth:
+            dirnames[:] = []
         try:
             newest = max(newest, os.stat(dirpath).st_mtime)
         except OSError:
@@ -103,6 +110,21 @@ def folder_activity(path: Path) -> tuple[dt.datetime | None, int]:
 
 def reindex(session: Session) -> dict[str, int]:
     """Rebuild the folder index. Missing roots are reported, never fatal."""
+    INDEX_STATE["running"] = True
+    INDEX_STATE["error"] = None
+    try:
+        stats = _reindex(session)
+        INDEX_STATE["roots"] = stats
+        return stats
+    except Exception as exc:  # noqa: BLE001
+        INDEX_STATE["error"] = str(exc)
+        raise
+    finally:
+        INDEX_STATE["running"] = False
+        INDEX_STATE["finished_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _reindex(session: Session) -> dict[str, int]:
     stats: dict[str, int] = {}
     session.execute(delete(LibraryItem))
     for root, media_type in config.library_roots():
