@@ -26,9 +26,12 @@ Browser -> JDownloader -> Download und automatisches Entpacken -> Episode Sorter
    (`Die.Verurteilten.1994` landet in `The Shawshank Redemption (1994)`). Bei zwei gleich guten
    Treffern wird nichts verschoben. Welche Quelle bei einem mehrdeutigen Titel wie `Dark` gewinnt,
    entscheidet der Dateiname: ohne Anime-Merkmale zählt TMDb mehr, mit Anime-Merkmalen AniList.
-5. **Bestehende Ordner gewinnen.** Alle vier Zielpfade werden indexiert. Existiert der erkannte Titel
+5. **Bestehende Ordner gewinnen.** Alle konfigurierten Zielpfade werden indexiert (zwei Anime-,
+   zwei Serien- und ein Filmspeicherort). Existiert der erkannte Titel
    schon irgendwo, landet die Folge genau dort, unabhängig vom eingestellten Standardpfad. Das gilt
-   besonders für die beiden Anime-Speicherorte. Bestehende Ordner werden nicht umbenannt.
+   besonders für die beiden Anime-Speicherorte. Bestehende Ordner werden nicht umbenannt, und ein
+   vorhandener Staffelordner behält seine Schreibweise: liegt dort `S2`, kommt die Folge nach `S2`
+   und nicht in ein neues `Season 02`.
 6. **Sicher verschieben.** Vor dem Verschieben werden Quelle, Zielpfad, Schreibrechte, freier Speicher
    und Zieldatei geprüft. Über Dataset-Grenzen hinweg wird unter temporärem Namen kopiert, die Größe
    oder Prüfsumme kontrolliert, am Ziel umbenannt und erst dann die Quelle gelöscht. Bei einem Fehler
@@ -59,12 +62,15 @@ Beim ersten Start werden sie aus den Umgebungsvariablen vorbelegt.
 
 | Einstellung | Standard | Zweck |
 | --- | --- | --- |
-| `download_dir` | `/downloads` | überwachter Downloadordner |
-| `anime_path_1` | `/mnt/poolToshiba/Animes` | Anime-Speicherort 1 |
-| `anime_path_2` | `/mnt/dataGrepDataset/Anime` | Anime-Speicherort 2 |
-| `series_path` | `/mnt/poolToshiba/Serien` | Serien |
+| `download_dir` | `/mnt/SmallPool/dataGrepDataset/Downloads/JDownloader` | überwachter Downloadordner |
+| `anime_path_1` | `/mnt/poolToshiba/Anime` | Anime-Speicherort 1 |
+| `anime_path_2` | `/mnt/SmallPool/dataGrepDataset/Anime` | Anime-Speicherort 2 |
+| `series_path` | `/mnt/poolToshiba/Serien` | Serien 1 |
+| `series_path_2` | `/mnt/SmallPool/dataGrepDataset/Serien` | Serien 2 |
 | `movies_path` | `/mnt/poolToshiba/Filme` | Filme |
-| `default_anime_path` | `/mnt/poolToshiba/Animes` | Ziel nur für völlig neue Anime |
+| `default_anime_path` | `/mnt/SmallPool/dataGrepDataset/Anime` | Ziel nur für völlig neue Anime |
+| `default_series_path` | `/mnt/SmallPool/dataGrepDataset/Serien` | Ziel nur für völlig neue Serien |
+| `default_movie_path` | `/mnt/poolToshiba/Filme` | Ziel nur für völlig neue Filme |
 | `auto_threshold` | `85` | ab welcher Sicherheit automatisch einsortiert wird |
 | `dry_run` | `true` | nur planen, nicht verschieben |
 | `verify_mode` | `size` | `size` oder `sha256` beim Kopieren über Datasets |

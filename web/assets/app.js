@@ -481,8 +481,11 @@ async function renderLog(root) {
 const SETTING_GROUPS = [
   {
     title: "Pfade",
-    hint: "Der Downloadordner wird überwacht, die vier Zielpfade werden indexiert.",
-    keys: ["download_dir", "anime_path_1", "anime_path_2", "series_path", "movies_path", "default_anime_path"],
+    hint: "Der Downloadordner wird überwacht, alle gefüllten Zielpfade werden indexiert. Ein vorhandener Ordner gewinnt immer gegen den Standardpfad.",
+    keys: [
+      "download_dir", "anime_path_1", "anime_path_2", "series_path", "series_path_2",
+      "movies_path", "movies_path_2", "default_anime_path", "default_series_path", "default_movie_path",
+    ],
   },
   {
     title: "Metadaten",
@@ -515,9 +518,13 @@ const SETTING_LABEL = {
   download_dir: "Downloadordner",
   anime_path_1: "Anime-Pfad 1",
   anime_path_2: "Anime-Pfad 2",
-  series_path: "Serienpfad",
-  movies_path: "Filmpfad",
+  series_path: "Serienpfad 1",
+  series_path_2: "Serienpfad 2",
+  movies_path: "Filmpfad 1",
+  movies_path_2: "Filmpfad 2 (optional)",
   default_anime_path: "Standardpfad für neue Anime",
+  default_series_path: "Standardpfad für neue Serien",
+  default_movie_path: "Standardpfad für neue Filme",
   tmdb_api_key: "TMDb API-Schlüssel",
   tmdb_language: "TMDb Sprache",
   use_anilist: "AniList verwenden",

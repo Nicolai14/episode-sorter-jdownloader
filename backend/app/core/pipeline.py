@@ -285,6 +285,7 @@ def analyze(session: Session, job: Job) -> Job:
 
     base_dir = library.default_root(media_type) or config.get("series_path")
     plan = naming.build_plan(
+        season_folder_override=library.find_season_folder(existing_folder, parsed.season),
         media_type=media_type,
         title=job.title or parsed.title or Path(job.filename).stem,
         year=job.year,
@@ -481,6 +482,7 @@ def plan_target(session: Session, job: Job, *, force_dir: str | None = None, for
         existing_folder = match.item.path if match else None
     base_dir = force_root or library.default_root(media_type) or config.get("series_path")
     plan = naming.build_plan(
+        season_folder_override=library.find_season_folder(existing_folder, job.season),
         media_type=media_type,
         title=job.title or job.parsed_title or path.stem,
         year=job.year,

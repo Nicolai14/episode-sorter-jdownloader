@@ -202,3 +202,34 @@ def test_equal_scores_across_media_types_go_to_review(session, library_tree, mon
     job = session.scalars(pipeline.select(Job).where(Job.filename.like("Nowhere%"))).one()
     assert job.status == "review"
     assert "match equally well" in job.reason
+
+
+def test_second_series_root_is_indexed_and_wins(session, library_tree, stub_metadata, set_config):
+    """A folder in the second series location beats the default series path."""
+    second = library_tree["series"].parent / "SerienZwei"
+    (second / "Attack on Titan (2013)").mkdir(parents=True)
+    set_config({"series_path_2": str(second)})
+    library.reindex(session)
+
+    _make_file(library_tree["downloads"] / "Attack.On.Titan.S03E01.German.1080p.WEB.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.filename.like("%S03E01%"))).one()
+    assert job.existing_folder == str(second / "Attack on Titan (2013)")
+    assert job.target_path.startswith(str(second))
+    set_config({"series_path_2": ""})
+
+
+def test_existing_season_folder_style_is_kept(session, library_tree, stub_metadata):
+    """The library uses S1 and S2. New episodes must not create a second Season 01 folder."""
+    folder = library_tree["anime_two"] / "Attack on Titan (2013)"
+    (folder / "S1").mkdir(parents=True)
+    (folder / "S2").mkdir()
+    library.reindex(session)
+
+    _make_file(library_tree["downloads"] / "Attack.On.Titan.S02E09.1080p.WEB.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.filename.like("%S02E09%"))).one()
+    assert job.target_dir == str(folder / "S2")
+    assert not (folder / "Season 02").exists()

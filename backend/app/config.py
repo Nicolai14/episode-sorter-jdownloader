@@ -15,11 +15,15 @@ from .models import Setting
 DEFAULTS: dict[str, Any] = {
     # paths
     "download_dir": "/downloads",
-    "anime_path_1": "/mnt/poolToshiba/Animes",
-    "anime_path_2": "/mnt/dataGrepDataset/Anime",
+    "anime_path_1": "/mnt/poolToshiba/Anime",
+    "anime_path_2": "/mnt/SmallPool/dataGrepDataset/Anime",
     "series_path": "/mnt/poolToshiba/Serien",
+    "series_path_2": "/mnt/SmallPool/dataGrepDataset/Serien",
     "movies_path": "/mnt/poolToshiba/Filme",
-    "default_anime_path": "/mnt/poolToshiba/Animes",
+    "movies_path_2": "",
+    "default_anime_path": "/mnt/SmallPool/dataGrepDataset/Anime",
+    "default_series_path": "/mnt/SmallPool/dataGrepDataset/Serien",
+    "default_movie_path": "/mnt/poolToshiba/Filme",
     # metadata
     "tmdb_api_key": "",
     "tmdb_language": "de-DE",
@@ -59,8 +63,12 @@ ENV_MAP = {
     "anime_path_1": "ES_ANIME_PATH_1",
     "anime_path_2": "ES_ANIME_PATH_2",
     "series_path": "ES_SERIES_PATH",
+    "series_path_2": "ES_SERIES_PATH_2",
     "movies_path": "ES_MOVIES_PATH",
+    "movies_path_2": "ES_MOVIES_PATH_2",
     "default_anime_path": "ES_DEFAULT_ANIME_PATH",
+    "default_series_path": "ES_DEFAULT_SERIES_PATH",
+    "default_movie_path": "ES_DEFAULT_MOVIE_PATH",
     "tmdb_api_key": "TMDB_API_KEY",
     "jd_email": "JD_EMAIL",
     "jd_password": "JD_PASSWORD",
@@ -153,17 +161,23 @@ def update(values: dict[str, Any], session: Session | None = None) -> dict[str, 
     return refresh()
 
 
+ROOT_KEYS: list[tuple[str, str]] = [
+    ("anime_path_1", "anime"),
+    ("anime_path_2", "anime"),
+    ("series_path", "series"),
+    ("series_path_2", "series"),
+    ("movies_path", "movie"),
+    ("movies_path_2", "movie"),
+]
+
+
 def library_roots() -> list[tuple[str, str]]:
-    """(path, media_type) for every configured library root."""
+    """(path, media_type) for every configured library root, empty ones skipped."""
     roots: list[tuple[str, str]] = []
-    for key in ("anime_path_1", "anime_path_2"):
+    for key, media_type in ROOT_KEYS:
         path = get(key)
         if path:
-            roots.append((path, "anime"))
-    if get("series_path"):
-        roots.append((get("series_path"), "series"))
-    if get("movies_path"):
-        roots.append((get("movies_path"), "movie"))
+            roots.append((str(path), media_type))
     seen: set[str] = set()
     unique: list[tuple[str, str]] = []
     for path, media_type in roots:
