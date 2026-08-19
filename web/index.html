@@ -25,9 +25,6 @@
       <button class="nav-item" data-view="log">Protokoll</button>
       <button class="nav-item" data-view="settings">Einstellungen</button>
     </nav>
-    <div class="rail-foot">
-      <p class="rail-note" id="railHealth">Verbindung wird geprüft</p>
-    </div>
   </aside>
 
   <main class="main">
@@ -37,13 +34,17 @@
         <p id="viewHint" class="hint">Was gerade läuft, was wartet und was schon einsortiert ist.</p>
       </div>
       <div class="topbar-right">
-        <label class="switch" for="dryRunToggle">
-          <input type="checkbox" id="dryRunToggle">
-          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
-          <span class="switch-label">Dry Run</span>
-        </label>
-        <button class="btn btn-primary" id="scanNow">Jetzt prüfen</button>
+        <div class="statusline" id="statusLine" aria-live="polite"></div>
+        <div class="topbar-actions">
+          <label class="switch" for="dryRunToggle">
+            <input type="checkbox" id="dryRunToggle">
+            <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+            <span class="switch-label">Dry Run</span>
+          </label>
+          <button class="btn btn-primary" id="scanNow">Jetzt prüfen</button>
+        </div>
       </div>
+      <span class="topbar-track" aria-hidden="true"><span class="topbar-progress" id="scanProgress"></span></span>
     </header>
 
     <div id="scrollSentinel" aria-hidden="true"></div>

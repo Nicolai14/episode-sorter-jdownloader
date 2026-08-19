@@ -8,6 +8,7 @@ const state = {
   librarySort: localStorage.getItem("es-library-sort") || "recent",
   libraryOpen: JSON.parse(localStorage.getItem("es-library-open") || "{}"),
   libraryShowAll: {},
+  scanShare: 0,
   settings: null,
   timer: null,
 };
@@ -119,7 +120,8 @@ async function refreshStatus() {
   try {
     state.status = await api("/api/status");
   } catch (error) {
-    qs("#railHealth").textContent = "Backend nicht erreichbar";
+    state.status = null;
+    renderStatusLine();
     return;
   }
   const counts = state.status.counts || {};
@@ -131,11 +133,75 @@ async function refreshStatus() {
   const toggle = qs("#dryRunToggle");
   if (document.activeElement !== toggle) toggle.checked = Boolean(state.status.dry_run);
 
-  const jd = state.status.jd || {};
-  const parts = [];
-  parts.push(state.status.dry_run ? "Dry Run aktiv" : "Verschieben aktiv");
-  parts.push(jd.enabled ? (jd.connected ? `JD verbunden (${jd.device || "Gerät"})` : "JD getrennt") : "JD aus, nur Ordnerwache");
-  qs("#railHealth").textContent = parts.join(" / ");
+  renderStatusLine();
+}
+
+function statusItem(label, tone = "idle", title = "") {
+  // A dot only where the colour carries state. Grey dots would be decoration.
+  const dot = tone === "idle" ? "" : '<i aria-hidden="true"></i>';
+  return `<span class="status-item" data-tone="${tone}"${title ? ` title="${esc(title)}"` : ""}>${dot}${esc(label)}</span>`;
+}
+
+function renderStatusLine() {
+  const node = qs("#statusLine");
+  if (!node) return;
+  const status = state.status;
+  if (!status) {
+    node.innerHTML = statusItem("Backend nicht erreichbar", "bad");
+    return;
+  }
+  const jd = status.jd || {};
+  const items = [];
+
+  items.push(status.dry_run
+    ? statusItem("Dry Run", "idle", "Es wird nur geplant, nichts verschoben")
+    : statusItem("Verschieben aktiv", "live", "Dateien werden wirklich verschoben"));
+
+  if (!jd.enabled) items.push(statusItem("Ordnerwache", "idle", "JDownloader-Anbindung ist aus, der Downloadordner wird trotzdem überwacht"));
+  else if (jd.connected) items.push(statusItem(`JDownloader ${jd.device || ""}`.trim(), "ok"));
+  else items.push(statusItem("JDownloader getrennt", "bad", jd.error || ""));
+
+  if (!status.tmdb_configured) items.push(statusItem("TMDb fehlt", "warn", "Ohne Schlüssel werden Filme und Serien nicht geprüft"));
+
+  if (status.library_index && status.library_index.running) items.push(statusItem("Bibliothek wird eingelesen", "warn"));
+
+  items.push(`<span class="status-item" data-tone="idle" id="scanTimer">${esc(scanTimerText())}</span>`);
+  node.innerHTML = items.join("");
+  tickScanTimer();
+}
+
+function scanTimerText() {
+  const scheduler = (state.status && state.status.scheduler) || {};
+  const last = scheduler.last_run && scheduler.last_run.at;
+  if (scheduler.running) return "Prüfung läuft";
+  if (!last) return "noch nicht geprüft";
+  const since = Math.max(0, Math.round(Date.now() / 1000 - last));
+  const interval = Number(scheduler.interval) || 60;
+  const next = Math.max(0, interval - since);
+  const sinceText = since < 60 ? `vor ${since} s` : `vor ${Math.round(since / 60)} min`;
+  return `geprüft ${sinceText}, nächste in ${next} s`;
+}
+
+function tickScanTimer() {
+  const node = qs("#scanTimer");
+  if (node) node.textContent = scanTimerText();
+
+  const bar = qs("#scanProgress");
+  if (!bar) return;
+  const scheduler = (state.status && state.status.scheduler) || {};
+  const last = scheduler.last_run && scheduler.last_run.at;
+  const interval = Number(scheduler.interval) || 60;
+  if (!last) { bar.style.transform = "scaleX(0)"; return; }
+  const share = Math.min(1, Math.max(0, (Date.now() / 1000 - last) / interval));
+  // Reset jumps back instead of sweeping backwards through the whole bar.
+  if (share < (state.scanShare || 0)) {
+    bar.style.transition = "none";
+    bar.style.transform = "scaleX(0)";
+    void bar.offsetWidth;
+    bar.style.transition = "";
+  }
+  state.scanShare = share;
+  bar.style.transform = `scaleX(${share.toFixed(3)})`;
 }
 
 function setCount(key, value, alert = false) {
@@ -966,6 +1032,7 @@ function boot() {
   qsa(".nav-item").forEach((item) => item.classList.toggle("is-active", item.dataset.view === state.view));
 
   refreshStatus().then(() => render({ entering: true }));
+  setInterval(() => { if (!document.hidden) tickScanTimer(); }, 1000);
   state.timer = setInterval(async () => {
     if (document.hidden) return;
     await refreshStatus();
