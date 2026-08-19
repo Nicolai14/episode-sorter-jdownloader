@@ -19,9 +19,13 @@ Browser -> JDownloader -> Download und automatisches Entpacken -> Episode Sorter
    `S02E01-E03`, `Episode 37`, `EP037`, `Season 2 Episode 5`, `Special`, `OVA`, `S00E01` und absolute
    Anime-Nummern wie `[SubsPlease] Frieren - 12`. Technische Bestandteile (1080p, 2160p, WEB-DL, WEBRip,
    BluRay, x264, x265, HEVC, GERMAN, ENGLISH, DUBBED, MULTI, Release-Gruppen) fallen aus dem Titel raus.
-4. **Metadaten prüfen.** TMDb für Filme und Serien, AniList zusätzlich für Anime. Geprüft werden
+4. **Metadaten prüfen.** TMDb für Filme und Serien (v3 API Key oder v4 Read Access Token, beides
+   wird erkannt), AniList zusätzlich für Anime. Geprüft werden
    Existenz des Titels, englischer Titel, Erscheinungsjahr, Plausibilität von Staffel und Folge sowie
-   alternative Titel. Bei zwei gleich guten Treffern wird nichts verschoben.
+   alternative Titel. Deutsche Releasenamen werden dabei auf den englischen Titel gemappt
+   (`Die.Verurteilten.1994` landet in `The Shawshank Redemption (1994)`). Bei zwei gleich guten
+   Treffern wird nichts verschoben. Welche Quelle bei einem mehrdeutigen Titel wie `Dark` gewinnt,
+   entscheidet der Dateiname: ohne Anime-Merkmale zählt TMDb mehr, mit Anime-Merkmalen AniList.
 5. **Bestehende Ordner gewinnen.** Alle vier Zielpfade werden indexiert. Existiert der erkannte Titel
    schon irgendwo, landet die Folge genau dort, unabhängig vom eingestellten Standardpfad. Das gilt
    besonders für die beiden Anime-Speicherorte. Bestehende Ordner werden nicht umbenannt.
