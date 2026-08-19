@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .. import config
@@ -480,6 +480,31 @@ def retry_failed(session: Session) -> int:
     return count
 
 
+def prune(session: Session) -> dict[str, int]:
+    """Keep the database small: the log and finished jobs must not grow forever."""
+    removed = {"events": 0, "jobs": 0}
+
+    keep = int(config.get("event_retention", 5000))
+    if keep > 0:
+        total = session.scalar(select(func.count(Event.id))) or 0
+        if total > keep * 1.2:  # prune in batches, not on every single event
+            cutoff = session.scalars(
+                select(Event.id).order_by(Event.id.desc()).offset(keep).limit(1)
+            ).first()
+            if cutoff:
+                result = session.execute(delete(Event).where(Event.id <= cutoff))
+                removed["events"] = int(result.rowcount or 0)
+
+    days = int(config.get("job_retention_days", 60))
+    if days > 0:
+        limit = utcnow() - dt.timedelta(days=days)
+        result = session.execute(
+            delete(Job).where(Job.status.in_(["done", "skipped"]), Job.updated_at < limit)
+        )
+        removed["jobs"] = int(result.rowcount or 0)
+    return removed
+
+
 def tick(session: Session) -> dict[str, Any]:
     result: dict[str, Any] = {}
     result["jd_packages"] = sync_jdownloader(session)
@@ -487,6 +512,7 @@ def tick(session: Session) -> dict[str, Any]:
     result["promoted"] = check_waiting(session)
     result.update(process_open_jobs(session))
     result["retried"] = retry_failed(session)
+    result.update({f"pruned_{key}": value for key, value in prune(session).items() if value})
     return result
 
 

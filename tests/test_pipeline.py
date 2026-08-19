@@ -256,3 +256,28 @@ def test_german_anime_release_is_recognised_as_anime(session, library_tree, monk
     job = session.scalars(pipeline.select(Job).where(Job.filename.like("Akame%"))).one()
     assert job.media_type == "anime"
     assert job.target_path.startswith(str(library_tree["anime_one"]))
+
+
+def test_prune_keeps_the_database_small(session, library_tree, set_config):
+    """The log must not grow forever on a machine that runs for months."""
+    from app.models import Event
+
+    set_config({"event_retention": 20, "job_retention_days": 1})
+    for index in range(60):
+        pipeline.log(session, f"Ereignis {index}")
+    session.flush()
+
+    removed = pipeline.prune(session)
+    session.flush()
+    remaining = session.scalar(pipeline.select(pipeline.func.count(Event.id)))
+    assert removed["events"] > 0
+    assert remaining <= 20
+
+    old = Job(
+        source_path="/tmp/old.mkv", filename="old.mkv", status="done",
+        updated_at=pipeline.utcnow() - __import__("datetime").timedelta(days=5),
+    )
+    session.add(old)
+    session.flush()
+    assert pipeline.prune(session)["jobs"] >= 1
+    set_config({"event_retention": 5000, "job_retention_days": 60})

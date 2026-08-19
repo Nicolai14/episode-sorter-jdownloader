@@ -41,6 +41,8 @@ DEFAULTS: dict[str, Any] = {
     "ignored_terms": ["sample", "trailer", "proof", "screens", "rarbg", "etrg"],
     "ignored_extensions": [".exe", ".bat", ".cmd", ".lnk", ".url", ".txt", ".nfo", ".sfv", ".jpg", ".png"],
     "verify_mode": "size",  # size | sha256
+    "event_retention": 5000,
+    "job_retention_days": 60,
     "free_space_margin_mb": 2048,
     "delete_empty_source_dirs": True,
     "move_subtitles": True,
