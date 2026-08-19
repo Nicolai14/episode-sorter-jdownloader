@@ -56,6 +56,7 @@ def build_plan(
     base_dir: str,
     existing_folder: str | None = None,
     special_kind: str | None = None,
+    season_folder_override: str | None = None,
 ) -> TargetPlan:
     notes: list[str] = []
     title_clean = sanitize(title)
@@ -82,6 +83,9 @@ def build_plan(
         season_folder = config.get("specials_folder", "Specials")
     else:
         season_folder = _format(config.get("season_folder_template"), season=season_number)
+    if season_folder_override:
+        season_folder = season_folder_override
+        notes.append(f"existing season folder reused: {season_folder_override}")
     if season is None:
         notes.append("no season in the filename, season 01 assumed")
 

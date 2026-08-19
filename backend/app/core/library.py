@@ -15,7 +15,8 @@ from .metadata import similarity
 from .parser import title_key
 
 _FOLDER_YEAR = re.compile(r"^(?P<name>.+?)[\s._]*[\(\[](?P<year>19\d{2}|20\d{2})[\)\]]\s*$")
-_SEASON_DIR = re.compile(r"(?i)^(season|staffel)[\s._-]*(?P<n>\d{1,3})$")
+_SEASON_DIR = re.compile(r"(?i)^(?:season|staffel|s)[\s._-]*(?P<n>\d{1,3})$")
+_SPECIALS_DIR = re.compile(r"(?i)^(?:specials?|extras?|ova|ovas)$")
 _SKIP_DIRS = {"@eadir", ".recycle", "#recycle", "lost+found", ".stfolder", ".git"}
 
 
@@ -34,19 +35,32 @@ def split_folder_name(folder_name: str) -> tuple[str, int | None]:
 
 
 def _seasons_in(path: Path) -> list[int]:
-    seasons: list[int] = []
+    return sorted(season_folders(path))
+
+
+def season_folders(path: Path) -> dict[int, str]:
+    """Season number to the folder name that is actually on disk (S1, S01, Season 01, Staffel 2)."""
+    found: dict[int, str] = {}
     try:
-        for entry in os.scandir(path):
-            if not entry.is_dir():
-                continue
-            match = _SEASON_DIR.match(entry.name)
-            if match:
-                seasons.append(int(match.group("n")))
-            elif entry.name.lower() in {"specials", "special"}:
-                seasons.append(0)
+        entries = sorted(os.scandir(path), key=lambda e: e.name)
     except OSError:
-        return seasons
-    return sorted(set(seasons))
+        return found
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        match = _SEASON_DIR.match(entry.name)
+        if match:
+            found.setdefault(int(match.group("n")), entry.name)
+        elif _SPECIALS_DIR.match(entry.name):
+            found.setdefault(0, entry.name)
+    return found
+
+
+def find_season_folder(series_dir: str | None, season: int | None) -> str | None:
+    """Reuse the season folder that already exists instead of adding a second style."""
+    if not series_dir or season is None:
+        return None
+    return season_folders(Path(series_dir)).get(season)
 
 
 def reindex(session: Session) -> dict[str, int]:
@@ -138,11 +152,12 @@ def _pick(items: list[LibraryItem], preferred_types: set[str], media_type: str, 
 
 
 def default_root(media_type: str) -> str:
+    """Where a title lands that has no folder anywhere yet."""
     if media_type == "anime":
         return config.get("default_anime_path") or config.get("anime_path_1")
     if media_type == "movie":
-        return config.get("movies_path")
-    return config.get("series_path")
+        return config.get("default_movie_path") or config.get("movies_path")
+    return config.get("default_series_path") or config.get("series_path")
 
 
 def known_roots_for(media_type: str) -> list[str]:
