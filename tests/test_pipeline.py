@@ -150,3 +150,55 @@ def test_waiting_while_extraction_runs(session, library_tree, stub_metadata):
     job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
     assert job.status == "waiting"
     assert "unpack" in job.reason or "writing" in job.reason
+
+
+def test_generic_title_prefers_tmdb_for_series(session, library_tree, monkeypatch):
+    """A name like "Dark" exists twice. Without anime hints TMDb has to win."""
+    from app.core.parser import parse as parse_name
+
+    def fake_lookup(title, hint, year=None):
+        candidates = [
+            metadata.Candidate(source="anilist", external_id=1, media_type="anime", title="Dark",
+                               original_title=None, english_title="Dark", year=2000, score=1.0),
+            metadata.Candidate(source="tmdb", external_id=70523, media_type="series", title="Dark",
+                               original_title="Dark", english_title="Dark", year=2017, score=1.0),
+        ]
+        preferred = {"anime": "anilist", "series": "tmdb", "movie": "tmdb"}.get(hint)
+        for candidate in candidates:
+            if preferred and candidate.source != preferred:
+                candidate.score = round(candidate.score - metadata.SOURCE_PENALTY, 3)
+        candidates.sort(key=lambda c: c.score, reverse=True)
+        return candidates, []
+
+    monkeypatch.setattr(pipeline.metadata, "lookup", fake_lookup)
+    monkeypatch.setattr(pipeline.metadata, "tmdb_season_plausible", lambda *args: (True, None))
+    library.reindex(session)
+
+    assert parse_name("Dark.S01E03.German.DL.1080p.WEB.h264-XYZ.mkv").media_hint == "series"
+    _make_file(library_tree["downloads"] / "Dark.S01E03.German.DL.1080p.WEB.h264-XYZ.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.filename.like("Dark.S01E03%"))).one()
+    assert job.media_type == "series"
+    assert job.year == 2017
+    assert job.target_path.startswith(str(library_tree["series"]))
+
+
+def test_equal_scores_across_media_types_go_to_review(session, library_tree, monkeypatch):
+    def fake_lookup(title, hint, year=None):
+        return [
+            metadata.Candidate(source="tmdb", external_id=1, media_type="series", title="Nowhere",
+                               original_title=None, english_title="Nowhere", year=2019, score=0.92),
+            metadata.Candidate(source="tmdb", external_id=2, media_type="movie", title="Nowhere",
+                               original_title=None, english_title="Nowhere", year=2023, score=0.9),
+        ], []
+
+    monkeypatch.setattr(pipeline.metadata, "lookup", fake_lookup)
+    monkeypatch.setattr(pipeline.metadata, "tmdb_season_plausible", lambda *args: (True, None))
+    library.reindex(session)
+    _make_file(library_tree["downloads"] / "Nowhere.S01E01.1080p.WEB.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.filename.like("Nowhere%"))).one()
+    assert job.status == "review"
+    assert "match equally well" in job.reason

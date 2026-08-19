@@ -228,11 +228,15 @@ def analyze(session: Session, job: Job) -> Job:
                     and best.score >= 0.6
                     and runner_up.score >= 0.6
                     and abs(best.score - runner_up.score) < 0.05
-                    and title_key(best.title) != title_key(runner_up.title)
+                    and (
+                        title_key(best.title) != title_key(runner_up.title)
+                        or best.media_type != runner_up.media_type
+                        or (best.year or 0) != (runner_up.year or 0)
+                    )
                 ):
                     blockers.append(
-                        f"two titles match equally well: {best.title} ({best.year}) and "
-                        f"{runner_up.title} ({runner_up.year})"
+                        f"two results match equally well: {best.title} ({best.year}, {best.media_type}) and "
+                        f"{runner_up.title} ({runner_up.year}, {runner_up.media_type})"
                     )
                 if best.score < 0.55:
                     blockers.append(f"the best metadata match is weak: {best.title} at {int(best.score * 100)}%")

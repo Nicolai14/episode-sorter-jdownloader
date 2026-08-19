@@ -10,7 +10,7 @@ from typing import Any
 import requests
 
 from .. import config
-from .parser import title_key
+from .parser import strict_title_key, title_key
 
 TMDB_BASE = "https://api.themoviedb.org/3"
 ANILIST_URL = "https://graphql.anilist.co"
@@ -68,11 +68,17 @@ def clear_cache() -> None:
 
 
 def similarity(left: str, right: str) -> float:
+    """1.0 only for a real match. "The Dark" and "Dark" stay distinguishable."""
+    strict_left, strict_right = strict_title_key(left), strict_title_key(right)
+    if not strict_left or not strict_right:
+        return 0.0
+    if strict_left == strict_right:
+        return 1.0
     a, b = title_key(left), title_key(right)
     if not a or not b:
         return 0.0
     if a == b:
-        return 1.0
+        return 0.93  # same title apart from a leading article
     ratio = SequenceMatcher(None, a, b).ratio()
     if a in b or b in a:
         ratio = max(ratio, 0.9 - abs(len(a) - len(b)) / max(len(a), len(b), 1) * 0.2)
@@ -101,15 +107,20 @@ def tmdb_available() -> bool:
 
 
 def _tmdb_request(path: str, params: dict[str, Any]) -> dict[str, Any]:
-    api_key = config.get("tmdb_api_key")
+    api_key = str(config.get("tmdb_api_key") or "").strip()
     if not api_key:
         raise MetadataError("TMDb API key is not configured")
-    params = {**params, "api_key": api_key}
+    headers: dict[str, str] = {}
+    if api_key.startswith("eyJ"):
+        # v4 read access token goes into the header, the v3 key into the query string
+        headers["Authorization"] = f"Bearer {api_key}"
+    else:
+        params = {**params, "api_key": api_key}
     cache_key = f"tmdb:{path}:{sorted((k, v) for k, v in params.items() if k != 'api_key')}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
-    response = requests.get(f"{TMDB_BASE}{path}", params=params, timeout=TIMEOUT)
+    response = requests.get(f"{TMDB_BASE}{path}", params=params, headers=headers, timeout=TIMEOUT)
     if response.status_code == 401:
         raise MetadataError("TMDb rejected the API key")
     response.raise_for_status()
@@ -260,8 +271,15 @@ def anilist_search(query: str, year: int | None = None) -> list[Candidate]:
     return candidates
 
 
+SOURCE_PENALTY = 0.08
+
+
 def lookup(title: str, media_hint: str, year: int | None = None) -> tuple[list[Candidate], list[str]]:
-    """Query the sources that fit the hint and return merged, sorted candidates."""
+    """Query the sources that fit the hint and return merged, sorted candidates.
+
+    A generic title like "Dark" exists both as a TMDb series and as an AniList anime.
+    The hint from the filename decides which source is trusted more.
+    """
     notes: list[str] = []
     results: list[Candidate] = []
 
@@ -285,6 +303,12 @@ def lookup(title: str, media_hint: str, year: int | None = None) -> tuple[list[C
             results += _try(tmdb_search, title, "tv", year)
     elif media_hint in {"movie", "series"}:
         notes.append("TMDb API key missing")
+
+    preferred = {"anime": "anilist", "series": "tmdb", "movie": "tmdb"}.get(media_hint)
+    if preferred:
+        for candidate in results:
+            if candidate.source != preferred:
+                candidate.score = round(max(0.0, candidate.score - SOURCE_PENALTY), 3)
 
     results.sort(key=lambda c: c.score, reverse=True)
     return results[:10], notes

@@ -110,12 +110,18 @@ def _strip_accents(value: str) -> str:
     return "".join(char for char in normalized if not unicodedata.combining(char))
 
 
-def title_key(value: str) -> str:
-    """Normalized key used to compare titles across sources."""
+def strict_title_key(value: str) -> str:
+    """Normalized key that keeps leading articles."""
     value = _strip_accents(value or "").lower()
     value = value.replace("&", " and ")
     value = re.sub(r"['’`]", "", value)
     value = re.sub(r"[^a-z0-9]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def title_key(value: str) -> str:
+    """Normalized key used to compare titles across sources, articles removed."""
+    value = strict_title_key(value)
     value = re.sub(r"\b(the|a|an|der|die|das|le|la|les)\b", " ", value)
     return re.sub(r"\s+", " ", value).strip()
 
@@ -186,7 +192,9 @@ def _guess_media(raw_lower: str, result: ParseResult, path_hint: str | None) -> 
     hint = (path_hint or "").lower()
     if any(word in hint for word in ("anime", "animes")):
         return "anime"
-    if any(word in raw_lower for word in ANIME_HINTS):
+    # Token based: "bd" must not match inside "abduction".
+    tokens = {token.lower() for token in re.split(r"[^a-z0-9]+", raw_lower) if token}
+    if tokens & ANIME_HINTS:
         return "anime"
     if result.absolute_episode is not None and result.season is None:
         return "anime"
