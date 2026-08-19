@@ -1,6 +1,7 @@
 """Index of the folders that already exist under the configured library roots."""
 from __future__ import annotations
 
+import datetime as dt
 import os
 import re
 from dataclasses import dataclass
@@ -79,6 +80,27 @@ def find_season_folder(series_dir: str | None, season: int | None) -> str | None
     return season_folders(Path(series_dir)).get(season)
 
 
+def folder_activity(path: Path) -> tuple[dt.datetime | None, int]:
+    """When something was last added to a folder, and how many video files it holds.
+
+    Directory mtimes are enough: adding an episode touches the folder it lands in.
+    That keeps the index cheap even on a library with a few hundred entries.
+    """
+    newest = 0.0
+    videos = 0
+    video_extensions = tuple(config.get("video_extensions"))
+    for dirpath, dirnames, filenames in os.walk(path):
+        dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+        try:
+            newest = max(newest, os.stat(dirpath).st_mtime)
+        except OSError:
+            continue
+        videos += sum(1 for name in filenames if name.lower().endswith(video_extensions))
+    if not newest:
+        return None, videos
+    return dt.datetime.fromtimestamp(newest, dt.timezone.utc).replace(tzinfo=None), videos
+
+
 def reindex(session: Session) -> dict[str, int]:
     """Rebuild the folder index. Missing roots are reported, never fatal."""
     stats: dict[str, int] = {}
@@ -98,6 +120,7 @@ def reindex(session: Session) -> dict[str, int]:
             if not entry.is_dir() or entry.name.startswith(".") or entry.name.lower() in _SKIP_DIRS:
                 continue
             title, year = folder_title(entry.name)
+            last_added, file_count = folder_activity(Path(entry.path))
             session.add(
                 LibraryItem(
                     root=root,
@@ -108,6 +131,8 @@ def reindex(session: Session) -> dict[str, int]:
                     year=year,
                     media_type=media_type,
                     seasons=_seasons_in(Path(entry.path)),
+                    last_added=last_added,
+                    file_count=file_count,
                     indexed_at=utcnow(),
                 )
             )

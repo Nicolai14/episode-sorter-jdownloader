@@ -296,6 +296,8 @@ def get_library(
                 "year": item.year,
                 "media_type": item.media_type,
                 "seasons": item.seasons,
+                "last_added": item.last_added.isoformat() if item.last_added else None,
+                "file_count": item.file_count,
             }
             for item in items
         ]
