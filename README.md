@@ -118,6 +118,19 @@ Inception (2010)/
 └── Inception (2010).mkv
 ```
 
+## JDownloader
+
+Die Anbindung läuft über My JDownloader. Im Dashboard unter *Einstellungen* die Kontodaten
+eintragen, `jd_enabled` einschalten, danach zeigt die Ansicht *JDownloader* laufende, fertige,
+entpackende und fehlgeschlagene Pakete.
+
+JDownloader meldet seine eigenen Containerpfade (`/output/...`). `jd_path_prefix` übersetzt sie
+auf den überwachten Downloadordner, damit im Dashboard der Pfad steht, den auch TrueNAS zeigt.
+
+Von unterwegs geht die Steuerung über my.jdownloader.org, die Handy-App oder
+`https://<hostname>`. Die Sortierung selbst braucht die Verbindung nicht, der
+Ordnerwächter arbeitet unabhängig weiter.
+
 ## Manuelle Entscheidungen
 
 Zur Entscheidung vorgelegt werden: mehrere passende Titel, unklare Medienart, unklare Staffel oder
