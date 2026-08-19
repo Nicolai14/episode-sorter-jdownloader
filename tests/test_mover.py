@@ -90,3 +90,14 @@ def test_ignored_files(tmp_path):
     assert files.is_ignored(Path("Some.Sample.mkv"))
     assert files.is_ignored(Path("setup.exe"))
     assert not files.is_ignored(Path("Attack.On.Titan.S02E01.mkv"))
+
+
+def test_jdownloader_paths_are_mapped_to_the_host(tmp_path):
+    from app.core import jdownloader
+
+    config.update({"download_dir": str(tmp_path / "downloads"), "jd_path_prefix": "/output"})
+    assert jdownloader.host_path("/output/Some.Release") == str(tmp_path / "downloads" / "Some.Release")
+    assert jdownloader.host_path("/output") == str(tmp_path / "downloads")
+    # Paths outside the prefix stay untouched
+    assert jdownloader.host_path("/mnt/other/place") == "/mnt/other/place"
+    assert jdownloader.host_path(None) is None
