@@ -233,3 +233,26 @@ def test_existing_season_folder_style_is_kept(session, library_tree, stub_metada
     job = session.scalars(pipeline.select(Job).where(Job.filename.like("%S02E09%"))).one()
     assert job.target_dir == str(folder / "S2")
     assert not (folder / "Season 02").exists()
+
+
+def test_german_anime_release_is_recognised_as_anime(session, library_tree, monkeypatch):
+    """Akame.Ga.Kill.S01E05.German.DL.1080p.WEB looks like a series. AniList says otherwise."""
+    def fake_lookup(title, hint, year=None):
+        return [
+            metadata.Candidate(source="tmdb", external_id=1, media_type="series", title="Akame ga Kill!",
+                               original_title=None, english_title="Akame ga Kill!", year=2014, score=1.0),
+            metadata.Candidate(source="anilist", external_id=2, media_type="anime", title="Akame ga Kill!",
+                               original_title=None, english_title="Akame ga Kill!", year=2014, score=0.92,
+                               alt_titles=["Akame ga Kill!", "Akame ga KILL!"]),
+        ], []
+
+    monkeypatch.setattr(pipeline.metadata, "lookup", fake_lookup)
+    monkeypatch.setattr(pipeline.metadata, "tmdb_season_plausible", lambda *args: (True, None))
+    library.reindex(session)
+
+    _make_file(library_tree["downloads"] / "Akame.Ga.Kill.S01E05.German.DL.1080p.WEB.h264-GRP.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.filename.like("Akame%"))).one()
+    assert job.media_type == "anime"
+    assert job.target_path.startswith(str(library_tree["anime_one"]))
