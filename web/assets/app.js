@@ -510,7 +510,7 @@ const SETTING_GROUPS = [
   {
     title: "JDownloader",
     hint: "My JDownloader Zugangsdaten. Ohne Verbindung läuft nur die Ordnerwache.",
-    keys: ["jd_enabled", "jd_email", "jd_password", "jd_device", "watch_folder_fallback"],
+    keys: ["jd_enabled", "jd_email", "jd_password", "jd_device", "jd_path_prefix", "watch_folder_fallback"],
   },
 ];
 
@@ -551,6 +551,7 @@ const SETTING_LABEL = {
   jd_email: "My JDownloader E-Mail",
   jd_password: "My JDownloader Passwort",
   jd_device: "Gerätename",
+  jd_path_prefix: "JD-Pfad im Container",
   watch_folder_fallback: "Ordnerwache als Rückfallebene",
 };
 

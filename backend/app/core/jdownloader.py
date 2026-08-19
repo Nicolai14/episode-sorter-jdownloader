@@ -157,6 +157,17 @@ class JDClient:
         return folders
 
 
+def host_path(save_to: str | None) -> str | None:
+    """JDownloader reports its own container path. Map it onto the watched folder."""
+    if not save_to:
+        return save_to
+    prefix = str(config.get("jd_path_prefix") or "").rstrip("/")
+    target = str(config.get("download_dir") or "").rstrip("/")
+    if prefix and target and (save_to == prefix or save_to.startswith(prefix + "/")):
+        return target + save_to[len(prefix):]
+    return save_to
+
+
 def _to_package(row: dict[str, Any], source: str) -> Package:
     status = str(row.get("status") or "")
     state = str(row.get("statusIconKey") or row.get("state") or "")
@@ -167,7 +178,7 @@ def _to_package(row: dict[str, Any], source: str) -> Package:
     return Package(
         uuid=str(row.get("uuid")),
         name=str(row.get("name") or "unnamed package"),
-        save_to=row.get("saveTo"),
+        save_to=host_path(row.get("saveTo")),
         state=state or None,
         status_text=status or None,
         bytes_total=total,

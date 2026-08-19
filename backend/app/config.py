@@ -55,6 +55,9 @@ DEFAULTS: dict[str, Any] = {
     "jd_password": "",
     "jd_device": "",
     "jd_enabled": False,
+    # JDownloader reports the path inside its own container. Everything below this
+    # prefix is rewritten to the download folder Episode Sorter watches.
+    "jd_path_prefix": "/output",
     "watch_folder_fallback": True,
 }
 
