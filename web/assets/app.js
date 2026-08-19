@@ -77,7 +77,10 @@ function relTime(iso) {
   const diff = Math.round((Date.now() - then) / 1000);
   if (diff < 60) return `vor ${diff}s`;
   if (diff < 3600) return `vor ${Math.round(diff / 60)} min`;
-  if (diff < 86400) return `vor ${Math.round(diff / 3600)} h`;
+  if (diff < 86400) {
+    const hours = Math.round(diff / 3600);
+    return hours === 1 ? "vor 1 h" : `vor ${hours} h`;
+  }
   return new Date(iso).toLocaleDateString("de-DE");
 }
 
@@ -425,7 +428,10 @@ function addedLabel(iso) {
   const then = new Date(iso);
   const days = (Date.now() - then.getTime()) / 86400000;
   if (days < 1) return relTime(iso);
-  if (days < 14) return `vor ${Math.round(days)} Tagen`;
+  if (days < 14) {
+    const whole = Math.round(days);
+    return whole === 1 ? "vor 1 Tag" : `vor ${whole} Tagen`;
+  }
   return then.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
@@ -812,6 +818,10 @@ async function run(trigger, task) {
 
 /* ------------------------------------------------------------------ shell */
 
+// Views that change while you watch. Library, rules and settings would only
+// wipe what you typed.
+const LIVE_VIEWS = new Set(["overview", "decisions", "duplicates", "jdownloader", "log"]);
+
 const RENDERERS = {
   overview: renderOverview,
   decisions: renderDecisions,
@@ -889,7 +899,7 @@ function boot() {
   state.timer = setInterval(async () => {
     if (document.hidden) return;
     await refreshStatus();
-    if (!state.paused) await render();
+    if (!state.paused && LIVE_VIEWS.has(state.view)) await render();
   }, 7000);
 }
 
