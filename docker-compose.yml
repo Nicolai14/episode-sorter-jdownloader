@@ -26,12 +26,11 @@ services:
       JD_DEVICE: ${JD_DEVICE:-}
     volumes:
       - ./data:/data
-      - ${DOWNLOAD_DIR:-/mnt/SmallPool/dataGrepDataset/Downloads/JDownloader}:${DOWNLOAD_DIR:-/mnt/SmallPool/dataGrepDataset/Downloads/JDownloader}
-      - /mnt/poolToshiba/Anime:/mnt/poolToshiba/Anime
-      - /mnt/SmallPool/dataGrepDataset/Anime:/mnt/SmallPool/dataGrepDataset/Anime
-      - /mnt/poolToshiba/Serien:/mnt/poolToshiba/Serien
-      - /mnt/SmallPool/dataGrepDataset/Serien:/mnt/SmallPool/dataGrepDataset/Serien
-      - /mnt/poolToshiba/Filme:/mnt/poolToshiba/Filme
+      # One mount per pool, not one per folder. A rename only works inside a single
+      # mount point, so separate mounts would turn every move within a pool into a
+      # full copy.
+      - /mnt/SmallPool/dataGrepDataset:/mnt/SmallPool/dataGrepDataset
+      - /mnt/poolToshiba:/mnt/poolToshiba
     ports:
       - "${ES_PORT:-18080}:8080"
 

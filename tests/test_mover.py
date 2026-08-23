@@ -102,3 +102,37 @@ def test_jdownloader_paths_are_mapped_to_the_host(tmp_path):
     # Paths outside the prefix stay untouched
     assert jdownloader.host_path("/mnt/other/place") == "/mnt/other/place"
     assert jdownloader.host_path(None) is None
+
+
+def test_rename_across_mount_points_falls_back_to_copy(tmp_path, monkeypatch):
+    """Bind mounts inside a container report the same device but refuse a rename."""
+    import errno as errno_module
+
+    monkeypatch.setattr(mover.files, "same_filesystem", lambda a, b: True)
+    calls = {"replace": 0}
+    real_replace = mover.os.replace
+
+    def fake_replace(src, dst):
+        calls["replace"] += 1
+        raise OSError(errno_module.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(mover.os, "replace", fake_replace)
+    source = tmp_path / "in.mkv"
+    payload = b"z" * 4096
+    source.write_bytes(payload)
+    target = tmp_path / "lib" / "out.mkv"
+
+    # os.replace is also used to put the verified copy in place, so only the first
+    # call has to fail.
+    def replace_once(src, dst):
+        calls["replace"] += 1
+        if calls["replace"] == 1:
+            raise OSError(errno_module.EXDEV, "Invalid cross-device link")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(mover.os, "replace", replace_once)
+    result = mover.move(source, target)
+
+    assert result.method == "Kopieren und Prüfen"
+    assert target.read_bytes() == payload
+    assert not source.exists()

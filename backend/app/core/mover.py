@@ -1,6 +1,7 @@
 """Safe file moves: verify first, copy across datasets, delete the source last."""
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import shutil
@@ -80,9 +81,17 @@ def move(source: Path, target: Path, *, dry_run: bool = False) -> MoveResult:
 
     target.parent.mkdir(parents=True, exist_ok=True)
 
+    # Try the cheap path first. Inside a container every bind mount is its own
+    # mount point, so a rename can fail with EXDEV even when the host sees one
+    # filesystem. The device numbers look identical in that case, so asking is
+    # not enough, only trying is.
     if files.same_filesystem(source, target.parent):
-        os.replace(source, target)
-        return MoveResult(str(source), str(target), "Umbenennen", size, "gleiches Dateisystem")
+        try:
+            os.replace(source, target)
+            return MoveResult(str(source), str(target), "Umbenennen", size, "gleiches Dateisystem")
+        except OSError as exc:
+            if exc.errno != errno.EXDEV:
+                raise
 
     temp = target.with_name(target.name + ".es-part")
     if temp.exists():
