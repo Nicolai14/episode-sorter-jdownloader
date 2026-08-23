@@ -33,6 +33,23 @@ def source_health() -> dict[str, dict[str, Any]]:
 _cache_lock = threading.Lock()
 _cache: dict[str, tuple[float, Any]] = {}
 
+# Both anime APIs limit requests per second. A package with a dozen episodes would
+# otherwise run into a 429 right after the first few files.
+_throttle_lock = threading.Lock()
+_last_call: dict[str, float] = {}
+MIN_INTERVAL = {"anilist": 0.7, "jikan": 0.7}
+
+
+def _throttle(source: str) -> None:
+    minimum = MIN_INTERVAL.get(source, 0.0)
+    if not minimum:
+        return
+    with _throttle_lock:
+        wait = minimum - (time.time() - _last_call.get(source, 0.0))
+        if wait > 0:
+            time.sleep(min(wait, 2.0))
+        _last_call[source] = time.time()
+
 
 class MetadataError(RuntimeError):
     pass
@@ -295,6 +312,7 @@ def anilist_search(query: str, year: int | None = None) -> list[Candidate]:
     cache_key = f"anilist:{query.lower()}"
     payload = _cache_get(cache_key)
     if payload is None:
+        _throttle("anilist")
         try:
             response = requests.post(
                 ANILIST_URL,
@@ -352,6 +370,7 @@ def jikan_search(query: str, year: int | None = None) -> list[Candidate]:
     cache_key = f"jikan:{query.lower()}"
     payload = _cache_get(cache_key)
     if payload is None:
+        _throttle("jikan")
         try:
             response = requests.get(
                 JIKAN_URL,
