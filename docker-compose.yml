@@ -55,6 +55,11 @@ services:
       - ${DOWNLOAD_DIR:-/mnt/SmallPool/dataGrepDataset/Downloads/JDownloader}:/output
     ports:
       - "${JD_PORT:-5800}:5800"
+      # Click'n'Load. The browser posts to 127.0.0.1:9666 on the machine it runs
+      # on, so a port proxy on that machine has to forward here. LAN only, this
+      # port accepts add-link commands without authentication.
+      - "${JD_CNL_PORT:-9666}:9666"
+      - "9665:9665"
 
   # Only needed when the host does not already run a cloudflared tunnel.
   # On the TrueNAS the tunnel runs as its own app, so this service stays off.
