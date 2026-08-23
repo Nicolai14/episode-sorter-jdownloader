@@ -131,6 +131,44 @@ Von unterwegs geht die Steuerung über my.jdownloader.org, die Handy-App oder
 `https://<hostname>`. Die Sortierung selbst braucht die Verbindung nicht, der
 Ordnerwächter arbeitet unabhängig weiter.
 
+## Click'n'Load auf einen entfernten JDownloader
+
+Click'n'Load funktioniert so, dass die Webseite per JavaScript an
+`http://127.0.0.1:9666` schickt, also immer an den Rechner, auf dem der Browser läuft. Ein
+JDownloader auf dem NAS bekommt davon nichts mit. Die offizielle Browser-Erweiterung war
+Manifest V2 und funktioniert in Chrome seit Anfang 2025 nicht mehr.
+
+Der Weg, der ohne Erweiterung funktioniert: auf dem eigenen Rechner Port 9666 auf den NAS
+weiterleiten. Für die Webseite sieht das aus wie ein lokaler JDownloader.
+
+**Windows, einmalig als Administrator, überlebt Neustarts:**
+
+```powershell
+netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=9666 connectaddress=<nas-ip> connectport=9666
+netsh interface portproxy show all      # zum Prüfen
+netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=9666   # zum Entfernen
+```
+
+**macOS oder Linux, solange das Fenster offen bleibt:**
+
+```bash
+ssh -N -L 9666:127.0.0.1:9666 root@<nas-ip>
+```
+
+Zwei Dinge sind dabei wichtig:
+
+* Ein lokal laufender JDownloader belegt Port 9666 selbst und gewinnt. Also lokal beenden.
+* JDownloader fragt bei jeder Webseite einmal nach, ob sie Links hinzufügen darf. Diese
+  Rückfrage erscheint jetzt auf dem NAS, also im JD-Fenster unter `<hostname>`.
+  Einmal *immer erlauben* klicken, danach steht die Seite in der Liste
+  `ExternInterfaceAuth` und die Frage kommt nicht wieder.
+
+Der Container veröffentlicht dafür Port 9666 im LAN. Dieser Port nimmt Links ohne
+Anmeldung an, er darf nicht ins Internet.
+
+Ohne Click'n'Load geht außerdem immer: einfache Links über `my.jdownloader.org`, die
+Handy-App oder das JD-Fenster einwerfen.
+
 ## Manuelle Entscheidungen
 
 Zur Entscheidung vorgelegt werden: mehrere passende Titel, unklare Medienart, unklare Staffel oder
