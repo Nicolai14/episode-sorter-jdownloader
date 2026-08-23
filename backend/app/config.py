@@ -52,7 +52,8 @@ DEFAULTS: dict[str, Any] = {
     "episode_template": "{title} ({year}) - S{season:02d}E{episode:02d}",
     "episode_range_template": "{title} ({year}) - S{season:02d}E{episode:02d}-E{episode_end:02d}",
     "movie_template": "{title} ({year})",
-    "season_folder_template": "Season {season:02d}",
+    # The library uses S1, S2, S3 in 234 of its folders, so new folders match that.
+    "season_folder_template": "S{season}",
     "specials_folder": "Specials",
     # jdownloader
     "jd_email": "",

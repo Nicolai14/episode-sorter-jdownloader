@@ -54,7 +54,7 @@ def test_existing_folder_wins_over_default_path(session, library_tree, stub_meta
     job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
     assert job.media_type == "anime"
     assert job.status == "planned"  # dry run
-    assert job.target_path == str(existing / "Season 02" / "Attack on Titan (2013) - S02E01.mkv")
+    assert job.target_path == str(existing / "S2" / "Attack on Titan (2013) - S02E01.mkv")
     assert source.exists(), "dry run must not move anything"
 
 

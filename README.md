@@ -102,6 +102,8 @@ Beim ersten Start werden sie aus den Umgebungsvariablen vorbelegt.
 | `dry_run` | `true` | nur planen, nicht verschieben |
 | `verify_mode` | `size` | `size` oder `sha256` beim Kopieren über Datasets |
 | `episode_template` | `{title} ({year}) - S{season:02d}E{episode:02d}` | Dateiname Episode |
+| `season_folder_template` | `S{season}` | Staffelordner für neue Titel, vorhandene behalten ihre Schreibweise |
+| `prefer_anime` | `true` | unklare Serienfälle gelten als Anime |
 | `movie_template` | `{title} ({year})` | Dateiname Film |
 | `ignored_terms` | `sample, trailer, proof, ...` | Dateien, die nie angefasst werden |
 
@@ -109,7 +111,7 @@ Beim ersten Start werden sie aus den Umgebungsvariablen vorbelegt.
 
 ```
 Attack on Titan (2013)/
-└── Season 02/
+└── S2/
     ├── Attack on Titan (2013) - S02E01.mkv
     ├── Attack on Titan (2013) - S02E01.de.srt
     └── Attack on Titan (2013) - S02E01.en.srt
