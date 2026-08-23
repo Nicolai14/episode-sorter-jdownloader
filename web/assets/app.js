@@ -163,6 +163,16 @@ function renderStatusLine() {
 
   if (!status.tmdb_configured) items.push(statusItem("TMDb fehlt", "warn", "Ohne Schlüssel werden Filme und Serien nicht geprüft"));
 
+  const sources = status.metadata_sources || {};
+  const NAMES = { tmdb: "TMDb", anilist: "AniList", jikan: "MyAnimeList" };
+  const down = Object.entries(sources).filter(([, value]) => value && value.ok === false);
+  if (down.length) {
+    const labels = down.map(([key]) => NAMES[key] || key).join(", ");
+    const why = down.map(([key, value]) => `${NAMES[key] || key}: ${value.error || "unbekannt"}`).join(" | ");
+    items.push(statusItem(`${labels} antwortet nicht`, "warn", why));
+  }
+  if (status.prefer_anime) items.push(statusItem("Anime bevorzugt", "idle", "Unklare Fälle werden als Anime behandelt"));
+
   if (status.library_index && status.library_index.running) items.push(statusItem("Bibliothek wird eingelesen", "warn"));
 
   items.push(`<span class="status-item" data-tone="idle" id="scanTimer">${esc(scanTimerText())}</span>`);
@@ -667,8 +677,8 @@ const SETTING_GROUPS = [
   },
   {
     title: "Metadaten",
-    hint: "TMDb deckt Filme und Serien ab, AniList zusätzlich Anime.",
-    keys: ["tmdb_api_key", "tmdb_language", "use_anilist", "metadata_cache_hours"],
+    hint: "TMDb deckt Filme und Serien ab, AniList und MyAnimeList zusätzlich Anime. Fällt eine Anime-Quelle aus, erkennt TMDb Anime an Sprache und Herkunftsland.",
+    keys: ["tmdb_api_key", "tmdb_language", "use_anilist", "use_jikan", "prefer_anime", "metadata_cache_hours"],
   },
   {
     title: "Verhalten",
@@ -710,6 +720,8 @@ const SETTING_LABEL = {
   tmdb_api_key: "TMDb API-Schlüssel",
   tmdb_language: "TMDb Sprache",
   use_anilist: "AniList verwenden",
+  use_jikan: "MyAnimeList als Ersatz verwenden",
+  prefer_anime: "Im Zweifel Anime annehmen",
   metadata_cache_hours: "Cache in Stunden",
   dry_run: "Dry Run",
   auto_threshold: "Automatische Erkennungsschwelle in Prozent",

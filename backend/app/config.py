@@ -28,6 +28,9 @@ DEFAULTS: dict[str, Any] = {
     "tmdb_api_key": "",
     "tmdb_language": "de-DE",
     "use_anilist": True,
+    "use_jikan": True,
+    # This library is mostly anime, so ambiguous cases lean that way.
+    "prefer_anime": True,
     "metadata_cache_hours": 72,
     # behaviour
     "dry_run": True,

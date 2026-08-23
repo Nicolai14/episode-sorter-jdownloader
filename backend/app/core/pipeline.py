@@ -156,35 +156,36 @@ def _package_video_count(session: Session, job: Job) -> int:
     return total
 
 
-def _anime_crosscheck(
-    candidates: list[metadata.Candidate], title: str | None, year: int | None, media_type: str
+def _pick_media_type(
+    parsed: ParseResult,
+    best: metadata.Candidate | None,
+    rule: Rule | None,
 ) -> tuple[str, str | None]:
-    """AniList only knows anime. A German anime release looks exactly like a series release,
-    so a matching AniList entry outranks the TMDb classification."""
-    if media_type not in {"series", "unknown"} or not title:
-        return media_type, None
-    for candidate in candidates:
-        if candidate.source != "anilist":
-            continue
-        names = [candidate.title, candidate.english_title, *(candidate.alt_titles or [])]
-        if max((metadata.similarity(name, title) for name in names if name), default=0.0) < 0.85:
-            continue
-        if year and candidate.year and abs(year - candidate.year) > 1:
-            continue
-        return "anime", f"AniList kennt diesen Titel ({candidate.title}), wird als Anime behandelt"
-    return media_type, None
-
-
-def _pick_media_type(parsed: ParseResult, best: metadata.Candidate | None, rule: Rule | None) -> str:
+    """Decide anime, series or movie. Returns the type and a note about the reason."""
     if rule:
-        return rule.media_type
+        return rule.media_type, None
+
+    prefer_anime = bool(config.get("prefer_anime", True))
+    episodic = parsed.episode is not None or parsed.absolute_episode is not None or parsed.season is not None
+
     if best is None:
-        return parsed.media_hint
-    if best.source == "anilist":
-        return "anime"
-    if best.media_type == "movie" and parsed.episode is None and parsed.absolute_episode is None:
-        return "movie"
-    return "series" if parsed.media_hint != "anime" else "anime"
+        if parsed.media_hint != "unknown":
+            return parsed.media_hint, None
+        if prefer_anime and episodic:
+            return "anime", "Keine Metadaten, wegen der Bibliothek als Anime behandelt"
+        return "unknown", None
+
+    if best.media_type == "movie" and not episodic:
+        return "movie", None
+    if best.source in {"anilist", "jikan"}:
+        return "anime", None
+    if best.anime_signal:
+        return "anime", f"TMDb führt {best.title} als japanische Produktion, also Anime"
+    if parsed.media_hint == "anime":
+        return "anime", "Der Dateiname trägt Anime-Merkmale"
+    if prefer_anime and parsed.media_hint == "unknown" and episodic:
+        return "anime", "Unklarer Fall, wegen der Bibliothek als Anime behandelt"
+    return "series", None
 
 
 def _existing_episode(directory: Path, season: int | None, episode: int | None) -> str | None:
@@ -205,7 +206,13 @@ def analyze(session: Session, job: Job) -> Job:
         job.error = "Die Quelldatei ist verschwunden"
         return job
 
-    parsed = parse(job.filename, folder_name=path.parent.name, path_hint=str(path.parent))
+    # Only the folders below the download root are a hint. The mount path itself
+    # would otherwise leak into the decision.
+    try:
+        relative_hint = str(path.parent.relative_to(Path(config.get("download_dir"))))
+    except ValueError:
+        relative_hint = path.parent.name
+    parsed = parse(job.filename, folder_name=path.parent.name, path_hint=relative_hint)
     job.parse_debug = parsed.as_dict()
     job.parsed_title = parsed.title
     job.season = parsed.season
@@ -229,7 +236,7 @@ def analyze(session: Session, job: Job) -> Job:
         job.year = rule.year or parsed.year
         job.tmdb_id = rule.tmdb_id
         job.anilist_id = rule.anilist_id
-        media_type = rule.media_type
+        media_type, _ = _pick_media_type(parsed, None, rule)
     else:
         query = parsed.title
         if not query:
@@ -261,16 +268,14 @@ def analyze(session: Session, job: Job) -> Job:
                     blockers.append(f"Schwacher Metadatentreffer: {best.title} mit {int(best.score * 100)} Prozent")
             else:
                 blockers.append("Zu diesem Titel wurden keine Metadaten gefunden")
-        media_type = _pick_media_type(parsed, best, None)
+        media_type, type_note = _pick_media_type(parsed, best, None)
+        if type_note:
+            notes.append(type_note)
         job.title = (best.english_title or best.title) if best else parsed.title
         job.year = (best.year if best and best.year else parsed.year)
         job.tmdb_id = best.external_id if best and best.source == "tmdb" else None
         job.anilist_id = best.external_id if best and best.source == "anilist" else None
 
-    if not rule:
-        media_type, crosscheck_note = _anime_crosscheck(candidates, job.title, job.year, media_type)
-        if crosscheck_note:
-            notes.append(crosscheck_note)
     job.media_type = media_type
 
     if media_type == "unknown":
@@ -293,9 +298,17 @@ def analyze(session: Session, job: Job) -> Job:
             notes.append(message)
 
     # Existing folders win over the configured default path.
+    # Every name we know for this title, so a folder in romaji is found from an
+    # English release and the other way round.
     titles = [t for t in [job.title, parsed.title] if t]
-    if best and best.alt_titles:
-        titles.extend(best.alt_titles)
+    for candidate in candidates[:3]:
+        titles.append(candidate.title)
+        if candidate.english_title:
+            titles.append(candidate.english_title)
+        if candidate.original_title:
+            titles.append(candidate.original_title)
+        titles.extend(candidate.alt_titles or [])
+    titles = [title for title in dict.fromkeys(titles) if title]
     folder_match = library.find_folder(session, titles, media_type, job.year) if job.title else None
     existing_folder = None
     if rule and rule.target_dir:
@@ -313,6 +326,7 @@ def analyze(session: Session, job: Job) -> Job:
     base_dir = library.default_root(media_type) or config.get("series_path")
     plan = naming.build_plan(
         season_folder_override=library.find_season_folder(existing_folder, parsed.season),
+        flat=library.folder_layout(existing_folder) == "flat",
         media_type=media_type,
         title=job.title or parsed.title or Path(job.filename).stem,
         year=job.year,
@@ -529,6 +543,12 @@ def plan_target(session: Session, job: Job, *, force_dir: str | None = None, for
     path = Path(job.source_path)
     media_type = job.media_type or "series"
     titles = [t for t in [job.title, job.parsed_title] if t]
+    for candidate in (job.candidates or [])[:3]:
+        titles.append(candidate.get("title"))
+        titles.append(candidate.get("english_title"))
+        titles.append(candidate.get("original_title"))
+        titles.extend(candidate.get("alt_titles") or [])
+    titles = [title for title in dict.fromkeys(titles) if title]
     existing_folder = force_dir
     if existing_folder is None and not force_root:
         match = library.find_folder(session, titles, media_type, job.year) if titles else None
@@ -536,6 +556,7 @@ def plan_target(session: Session, job: Job, *, force_dir: str | None = None, for
     base_dir = force_root or library.default_root(media_type) or config.get("series_path")
     plan = naming.build_plan(
         season_folder_override=library.find_season_folder(existing_folder, job.season),
+        flat=library.folder_layout(existing_folder) == "flat",
         media_type=media_type,
         title=job.title or job.parsed_title or path.stem,
         year=job.year,

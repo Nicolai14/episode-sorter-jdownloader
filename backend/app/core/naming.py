@@ -57,6 +57,7 @@ def build_plan(
     existing_folder: str | None = None,
     special_kind: str | None = None,
     season_folder_override: str | None = None,
+    flat: bool = False,
 ) -> TargetPlan:
     notes: list[str] = []
     title_clean = sanitize(title)
@@ -100,13 +101,17 @@ def build_plan(
     stem = sanitize(_format(template, **values))
     if not year:
         stem = stem.replace(" ()", "")
-    directory = directory / sanitize(season_folder)
+    if flat and not season_folder_override:
+        notes.append("Ordner enthält die Folgen direkt, kein Staffelordner angelegt")
+        season_folder = None
+    else:
+        directory = directory / sanitize(season_folder)
     filename = stem + extension
     return TargetPlan(
         directory=str(directory),
         filename=filename,
         path=str(directory / filename),
-        season_folder=sanitize(season_folder),
+        season_folder=sanitize(season_folder) if season_folder else None,
         used_existing_folder=bool(existing_folder),
         notes=notes,
     )

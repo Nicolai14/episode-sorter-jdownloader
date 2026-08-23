@@ -45,3 +45,18 @@ def test_jobs_and_events_are_listable(client):
 
 def test_healthz(client):
     assert client.get("/healthz").json()["status"] == "ok"
+
+
+def test_timestamps_carry_the_utc_offset(client):
+    """Without an offset a browser reads a UTC timestamp as local time."""
+    client.post("/api/scan")
+    payload = client.get("/api/events").json()["events"]
+    assert payload, "es sollte mindestens ein Ereignis geben"
+    for event in payload[:5]:
+        assert event["ts"].endswith("+00:00"), event["ts"]
+
+
+def test_status_reports_metadata_sources(client):
+    payload = client.get("/api/status").json()
+    assert "metadata_sources" in payload
+    assert isinstance(payload["prefer_anime"], bool)

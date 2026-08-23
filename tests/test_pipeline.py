@@ -235,27 +235,85 @@ def test_existing_season_folder_style_is_kept(session, library_tree, stub_metada
     assert not (folder / "Season 02").exists()
 
 
-def test_german_anime_release_is_recognised_as_anime(session, library_tree, monkeypatch):
-    """Akame.Ga.Kill.S01E05.German.DL.1080p.WEB looks like a series. AniList says otherwise."""
-    def fake_lookup(title, hint, year=None):
-        return [
-            metadata.Candidate(source="tmdb", external_id=1, media_type="series", title="Akame ga Kill!",
-                               original_title=None, english_title="Akame ga Kill!", year=2014, score=1.0),
-            metadata.Candidate(source="anilist", external_id=2, media_type="anime", title="Akame ga Kill!",
-                               original_title=None, english_title="Akame ga Kill!", year=2014, score=0.92,
-                               alt_titles=["Akame ga Kill!", "Akame ga KILL!"]),
-        ], []
-
-    monkeypatch.setattr(pipeline.metadata, "lookup", fake_lookup)
+def _stub_lookup(monkeypatch, candidates):
+    monkeypatch.setattr(pipeline.metadata, "lookup", lambda title, hint, year=None: (candidates, []))
     monkeypatch.setattr(pipeline.metadata, "tmdb_season_plausible", lambda *args: (True, None))
-    library.reindex(session)
 
-    _make_file(library_tree["downloads"] / "Akame.Ga.Kill.S01E05.German.DL.1080p.WEB.h264-GRP.mkv")
+
+def _cand(**kwargs):
+    base = dict(
+        source="tmdb", external_id=1, media_type="series", title="Beispiel",
+        original_title=None, english_title="Beispiel", year=2024, score=1.0,
+    )
+    base.update(kwargs)
+    return metadata.Candidate(**base)
+
+
+def test_tmdb_japanese_production_counts_as_anime(session, library_tree, monkeypatch):
+    """TMDb lists anime as a series. Language and country say what it really is."""
+    _stub_lookup(monkeypatch, [_cand(title="Akame ga Kill!", year=2014, anime_signal=True)])
+    library.reindex(session)
+    source = _make_file(library_tree["downloads"] / "pkg" / "Akame.Ga.Kill.S01E05.German.DL.1080p.WEB.mkv")
     _run(session)
 
-    job = session.scalars(pipeline.select(Job).where(Job.filename.like("Akame%"))).one()
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
     assert job.media_type == "anime"
     assert job.target_path.startswith(str(library_tree["anime_one"]))
+
+
+def test_subtitle_marker_in_the_name_counts_as_anime(session, library_tree, monkeypatch):
+    """Ger.Eng.Sub appears on the anime releases in this library and on no series."""
+    _stub_lookup(monkeypatch, [_cand(title="Wind Breaker", year=2024)])
+    library.reindex(session)
+    source = _make_file(library_tree["downloads"] / "pkg2" / "Wind.Breaker.S01E03.Ger.Eng.Sub.AAC.1080p.WebDL.x264-Grp.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.media_type == "anime"
+
+
+def test_german_live_action_stays_a_series(session, library_tree, monkeypatch):
+    """The anime leaning must not swallow German live action."""
+    _stub_lookup(monkeypatch, [_cand(title="Dark", year=2017)])
+    library.reindex(session)
+    source = _make_file(library_tree["downloads"] / "pkg3" / "Dark.S01E03.German.DL.1080p.WEB.h264-XYZ.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.media_type == "series"
+    assert job.target_path.startswith(str(library_tree["series"]))
+
+
+def test_alternative_titles_find_the_existing_folder(session, library_tree, monkeypatch):
+    """The folder carries the romaji title, the release the English one."""
+    existing = library_tree["anime_one"] / "Mushoku-tensei ~Isekai ittara honki dasu~"
+    (existing / "S3").mkdir(parents=True)
+    _stub_lookup(monkeypatch, [_cand(
+        title="Mushoku Tensei: Jobless Reincarnation", year=2021, anime_signal=True,
+        alt_titles=["Mushoku Tensei: Jobless Reincarnation", "Mushoku Tensei: Isekai Ittara Honki Dasu"],
+    )])
+    library.reindex(session)
+    source = _make_file(library_tree["downloads"] / "pkg4" / "Mushoku.Tensei.Jobless.Reincarnation.2021.S03E09.Ger.Eng.Sub.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.existing_folder == str(existing)
+    assert job.target_dir == str(existing / "S3")
+
+
+def test_flat_folders_stay_flat(session, library_tree, monkeypatch):
+    """63 folders in this library keep their episodes directly in the series folder."""
+    existing = library_tree["anime_one"] / "The Worlds Strongest Rearguard"
+    existing.mkdir(parents=True)
+    (existing / "The.Worlds.Strongest.Rearguard.S01E07.Ger.Eng.Sub.mkv").write_bytes(b"x")
+    _stub_lookup(monkeypatch, [_cand(title="The World's Strongest Rearguard", year=2026, anime_signal=True)])
+    library.reindex(session)
+    source = _make_file(library_tree["downloads"] / "pkg5" / "The.Worlds.Strongest.Rearguard.2026.S01E08.Ger.Eng.Sub.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.target_dir == str(existing), job.target_dir
+    assert "Season" not in job.target_path
 
 
 def test_prune_keeps_the_database_small(session, library_tree, set_config):

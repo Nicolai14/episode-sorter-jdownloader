@@ -74,6 +74,27 @@ def season_folders(path: Path) -> dict[int, str]:
     return found
 
 
+def folder_layout(series_dir: str | None) -> str:
+    """How a series folder is organised: season subfolders, files straight in, or nothing yet.
+
+    63 of the folders in this library keep their episodes directly in the series
+    folder. Writing a season folder into one of those would split the series.
+    """
+    if not series_dir:
+        return "unknown"
+    path = Path(series_dir)
+    if season_folders(path):
+        return "season"
+    video_extensions = tuple(config.get("video_extensions"))
+    try:
+        for entry in os.scandir(path):
+            if entry.is_file() and entry.name.lower().endswith(video_extensions):
+                return "flat"
+    except OSError:
+        return "unknown"
+    return "unknown"
+
+
 def find_season_folder(series_dir: str | None, season: int | None) -> str | None:
     """Reuse the season folder that already exists instead of adding a second style."""
     if not series_dir or season is None:

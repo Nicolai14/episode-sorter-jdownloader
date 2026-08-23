@@ -1,6 +1,7 @@
 """REST API for the dashboard."""
 from __future__ import annotations
 
+import datetime as dt
 import os
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,15 @@ class RuleIn(BaseModel):
 # ---------------------------------------------------------------- helpers
 
 
+def iso(value: dt.datetime | None) -> str | None:
+    """Timestamps are stored in UTC. Without the offset a browser reads them as local time."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.timezone.utc)
+    return value.isoformat()
+
+
 def job_dict(job: Job) -> dict[str, Any]:
     return {
         "id": job.id,
@@ -81,9 +91,9 @@ def job_dict(job: Job) -> dict[str, Any]:
         "parse_debug": job.parse_debug or {},
         "dry_run": job.dry_run,
         "attempts": job.attempts,
-        "created_at": job.created_at.isoformat() if job.created_at else None,
-        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
-        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "created_at": iso(job.created_at),
+        "updated_at": iso(job.updated_at),
+        "finished_at": iso(job.finished_at),
     }
 
 
@@ -112,6 +122,8 @@ def status(session: Session = Depends(get_session)) -> dict[str, Any]:
         "download_dir_ok": download_dir.is_dir(),
         "library_roots": roots,
         "tmdb_configured": metadata.tmdb_available(),
+        "metadata_sources": metadata.source_health(),
+        "prefer_anime": bool(config.get("prefer_anime", True)),
         "anilist_enabled": bool(config.get("use_anilist", True)),
         "ffprobe": mediainfo.ffprobe_available(),
         "jd": {
@@ -166,7 +178,7 @@ def get_job(job_id: int, session: Session = Depends(get_session)) -> dict[str, A
     )
     payload = job_dict(job)
     payload["events"] = [
-        {"ts": event.ts.isoformat(), "level": event.level, "message": event.message} for event in events
+        {"ts": iso(event.ts), "level": event.level, "message": event.message} for event in events
     ]
     return payload
 
@@ -235,7 +247,7 @@ def events(limit: int = Query(120, le=500), session: Session = Depends(get_sessi
         "events": [
             {
                 "id": row.id,
-                "ts": row.ts.isoformat(),
+                "ts": iso(row.ts),
                 "level": row.level,
                 "source": row.source,
                 "message": row.message,
@@ -301,7 +313,7 @@ def get_library(
                 "year": item.year,
                 "media_type": item.media_type,
                 "seasons": item.seasons,
-                "last_added": item.last_added.isoformat() if item.last_added else None,
+                "last_added": iso(item.last_added),
                 "file_count": item.file_count,
             }
             for item in items
@@ -355,7 +367,7 @@ def list_rules(session: Session = Depends(get_session)) -> dict[str, Any]:
                 "target_dir": rule.target_dir,
                 "hits": rule.hits,
                 "enabled": rule.enabled,
-                "created_at": rule.created_at.isoformat(),
+                "created_at": iso(rule.created_at),
             }
             for rule in rules
         ]
@@ -412,7 +424,7 @@ def jd_packages(session: Session = Depends(get_session)) -> dict[str, Any]:
                 "finished": row.finished,
                 "extracting": row.extracting,
                 "failed": row.failed,
-                "seen_at": row.seen_at.isoformat(),
+                "seen_at": iso(row.seen_at),
             }
             for row in rows
         ],
