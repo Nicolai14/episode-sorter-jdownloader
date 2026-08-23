@@ -199,9 +199,34 @@ def _existing_episode(directory: Path, season: int | None, episode: int | None) 
     return None
 
 
+def _reconcile_missing_source(session: Session, job: Job) -> bool:
+    """A move can succeed while the bookkeeping is lost, for example when a later
+    step in the same pass fails and the transaction rolls back. If the planned
+    target holds a file, the job is done, not broken."""
+    if not job.target_path:
+        return False
+    target = Path(job.target_path)
+    if not target.is_file():
+        return False
+    try:
+        size = target.stat().st_size
+    except OSError:
+        return False
+    if job.size_bytes and abs(size - job.size_bytes) > max(1024 * 1024, job.size_bytes * 0.02):
+        return False
+    job.status = "done"
+    job.error = None
+    job.finished_at = job.finished_at or utcnow()
+    job.reason = "Die Datei liegt schon am Ziel, der Job wurde nachgetragen"
+    log(session, f"Bereits am Ziel, nachgetragen: {target.name}", job_id=job.id)
+    return True
+
+
 def analyze(session: Session, job: Job) -> Job:
     path = Path(job.source_path)
     if not path.exists():
+        if _reconcile_missing_source(session, job):
+            return job
         job.status = "failed"
         job.error = "Die Quelldatei ist verschwunden"
         return job
@@ -429,6 +454,8 @@ def execute(session: Session, job: Job, *, replace_existing: bool = False) -> Jo
         else:
             result = mover.move(source, target)
     except (mover.MoveError, OSError) as exc:
+        if not source.exists() and _reconcile_missing_source(session, job):
+            return job
         job.status = "failed"
         job.error = str(exc)
         job.next_attempt_at = utcnow() + dt.timedelta(minutes=10)

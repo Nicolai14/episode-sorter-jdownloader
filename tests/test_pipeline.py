@@ -372,3 +372,23 @@ def test_a_full_pass_commits(session, library_tree, stub_metadata):
     result = pipeline.tick(session)
     assert "error" not in result
     assert result["discovered"] == 1
+
+
+def test_a_file_already_at_the_target_counts_as_done(session, library_tree, stub_metadata, set_config):
+    """A pass can move a file and still lose its bookkeeping. The job must not end up
+    as an error when the file sits exactly where it was planned."""
+    library.reindex(session)
+    source = _make_file(library_tree["downloads"] / "already" / "Attack.On.Titan.S02E12.1080p.WEB.mkv", 4096)
+    _run(session)
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.target_path
+
+    # Simulate the move without telling the job about it.
+    target = Path(job.target_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(source.read_bytes())
+    source.unlink()
+
+    pipeline.analyze(session, job)
+    assert job.status == "done"
+    assert "nachgetragen" in job.reason
