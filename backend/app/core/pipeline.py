@@ -520,13 +520,20 @@ def prune(session: Session) -> dict[str, int]:
 
 
 def tick(session: Session) -> dict[str, Any]:
+    """One pass. Housekeeping runs last and must never take the pass down with it,
+    otherwise everything the pass did gets rolled back."""
     result: dict[str, Any] = {}
     result["jd_packages"] = sync_jdownloader(session)
     result["discovered"] = scan_downloads(session)
     result["promoted"] = check_waiting(session)
     result.update(process_open_jobs(session))
     result["retried"] = retry_failed(session)
-    result.update({f"pruned_{key}": value for key, value in prune(session).items() if value})
+    session.flush()
+    try:
+        result.update({f"pruned_{key}": value for key, value in prune(session).items() if value})
+    except Exception as exc:  # noqa: BLE001
+        result["prune_error"] = str(exc)
+        log(session, f"Aufräumen fehlgeschlagen: {exc}", level="warn")
     return result
 
 

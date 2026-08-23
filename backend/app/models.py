@@ -19,7 +19,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def utcnow() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
+    """Naive UTC, which is exactly what SQLite hands back on a read.
+
+    Mixing this with an aware value breaks every comparison, and the API attaches
+    the offset when it serialises.
+    """
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
 
 
 class Base(DeclarativeBase):

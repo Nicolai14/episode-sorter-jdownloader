@@ -339,3 +339,36 @@ def test_prune_keeps_the_database_small(session, library_tree, set_config):
     session.flush()
     assert pipeline.prune(session)["jobs"] >= 1
     set_config({"event_retention": 5000, "job_retention_days": 60})
+
+
+def test_prune_and_retry_survive_stored_timestamps(session, library_tree, set_config):
+    """Values read back from SQLite are naive. Comparing them with an aware now() crashed
+    every pass and rolled the whole pass back."""
+    import datetime as dt
+
+    assert pipeline.utcnow().tzinfo is None, "sonst vergleicht sich das nicht mit der Datenbank"
+
+    set_config({"job_retention_days": 1})
+    old = Job(
+        source_path="/tmp/prune-me.mkv", filename="prune-me.mkv", status="done",
+        updated_at=pipeline.utcnow() - dt.timedelta(days=3),
+    )
+    failed = Job(
+        source_path="/tmp/retry-me.mkv", filename="retry-me.mkv", status="failed",
+        next_attempt_at=pipeline.utcnow() + dt.timedelta(minutes=10),
+    )
+    session.add_all([old, failed])
+    session.flush()
+
+    assert pipeline.prune(session)["jobs"] >= 1
+    pipeline.retry_failed(session)  # darf nicht werfen
+    set_config({"job_retention_days": 60})
+
+
+def test_a_full_pass_commits(session, library_tree, stub_metadata):
+    """A pass has to survive to the end, otherwise everything it did is rolled back."""
+    library.reindex(session)
+    _make_file(library_tree["downloads"] / "commit-check" / "Attack.On.Titan.S02E11.1080p.WEB.mkv")
+    result = pipeline.tick(session)
+    assert "error" not in result
+    assert result["discovered"] == 1
