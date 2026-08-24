@@ -295,10 +295,15 @@ def remux(plan: Plan, *, dry_run: bool = True, keep_original: bool = False) -> R
         folder = source.parent
         folder_stat = folder.stat()
         os.utime(temp, (stat.st_atime, stat.st_mtime))
-        # Kein chmod: auf ZFS haengen an vielen Dateien NFSv4-ACLs, waehrend der
-        # Modus 000 ist. Ein chmod wuerde die ACL neu schreiben und die Datei fuer
-        # Plex und SMB unlesbar machen. Die neue Datei erbt die ACL des Ordners,
-        # genau wie ihre Nachbarn.
+        # Rechte nur uebernehmen, wenn das Original ueberhaupt Leserechte im Modus
+        # traegt. Auf ZFS stehen viele Dateien auf Modus 000 und sind allein ueber
+        # NFSv4-ACLs zugaenglich, ein chmod wuerde diese ACL neu schreiben und die
+        # Datei fuer Plex und SMB unlesbar machen.
+        if stat.st_mode & 0o444:
+            try:
+                os.chmod(temp, stat.st_mode & 0o7777)
+            except OSError:
+                pass
 
         if keep_original:
             source.replace(source.with_name(source.name + ".orig"))

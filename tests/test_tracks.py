@@ -112,3 +112,33 @@ def test_forced_german_signs_track_survives():
     plan = decide(streams, DUR, SIZE)
     assert 2 in plan.keep
     assert plan.drop == [3]
+
+
+def test_mode_is_only_copied_when_the_original_has_read_bits(tmp_path, monkeypatch):
+    """Auf ZFS stehen viele Dateien auf Modus 000 und haengen an einer ACL. Ein
+    chmod darauf wuerde die ACL neu schreiben und die Datei unlesbar machen."""
+    import os
+    from app.core import tracks as t
+
+    quelle = tmp_path / "film.mkv"
+    quelle.write_bytes(b"x" * 2048)
+    plan = t.Plan(path=str(quelle), size=2048, keep=[0, 1], drop=[2],
+                  streams=[Stream(0, "video", "h264", "", "", None, True, False, 8000.0, True)])
+
+    os.chmod(quelle, 0o000)  # vor dem Abfangen von chmod, sonst greift es nicht
+    aufrufe = []
+    monkeypatch.setattr(t.os, "chmod", lambda p, m: aufrufe.append(m))
+    monkeypatch.setattr(t, "probe", lambda p: ([Stream(0, "video", "h264", "", "", None, True, False, 8000.0, True)], 60.0, {}))
+    monkeypatch.setattr(t.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 0, "stderr": b""})())
+    monkeypatch.setattr(t, "_verify", lambda *a, **k: None)
+    monkeypatch.setattr(t.shutil, "disk_usage", lambda p: type("D", (), {"free": 10**12})())
+
+    def fake_replace(src, dst):
+        os.rename(src, dst)
+
+    temp = quelle.with_name("film.pruning.mkv")
+    temp.write_bytes(b"y" * 1024)
+    monkeypatch.setattr(t.os, "replace", fake_replace)
+
+    t.remux(plan, dry_run=False)
+    assert aufrufe == [], "bei Modus 000 darf kein chmod passieren"
