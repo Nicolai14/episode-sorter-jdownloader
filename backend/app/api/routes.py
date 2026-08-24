@@ -1,12 +1,15 @@
 """REST API for the dashboard."""
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+import json
 import os
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session
@@ -14,7 +17,7 @@ from sqlalchemy.orm import Session
 from .. import config
 from ..db import get_session
 from ..models import Event, JDPackage, Job, LibraryItem, Rule
-from ..core import jdownloader, library, mediainfo, metadata, pipeline
+from ..core import jdownloader, library, mediainfo, metadata, notify, pipeline
 from ..core.files import human_size
 from ..core.scheduler import scheduler
 
@@ -144,6 +147,45 @@ def status(session: Session = Depends(get_session)) -> dict[str, Any]:
             "interval": config.get("scan_interval_seconds"),
         },
     }
+
+
+def _fingerprint() -> str:
+    from ..db import session_scope
+
+    with session_scope() as session:
+        return notify.fingerprint(session)
+
+
+async def stream_generator():
+    """Sendet nur bei echten Änderungen, dazwischen ein Lebenszeichen."""
+    last = None
+    idle = 0
+    yield "retry: 5000\n\n"
+    while True:
+        try:
+            current = await asyncio.to_thread(_fingerprint)
+        except Exception:  # noqa: BLE001 - ein Aussetzer darf den Strom nicht beenden
+            current = last
+        if current != last:
+            last = current
+            idle = 0
+            yield f"event: change\ndata: {json.dumps({'version': current})}\n\n"
+        else:
+            idle += 1
+            if idle >= 15:  # hält die Verbindung durch Proxys offen
+                idle = 0
+                yield ": ping\n\n"
+        await asyncio.sleep(1.0)
+
+
+@router.get("/stream")
+async def stream() -> StreamingResponse:
+    """Server-Sent Events. Eine offene Verbindung, Nachricht nur bei Änderungen."""
+    return StreamingResponse(
+        stream_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
 
 
 @router.post("/scan")

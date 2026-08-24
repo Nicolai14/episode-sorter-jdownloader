@@ -60,3 +60,41 @@ def test_status_reports_metadata_sources(client):
     payload = client.get("/api/status").json()
     assert "metadata_sources" in payload
     assert isinstance(payload["prefer_anime"], bool)
+
+
+def test_fingerprint_changes_with_the_data(client):
+    """Der Ereignisstrom haengt daran, also muss er sich bei Aenderungen bewegen."""
+    from app.core import notify
+    from app.db import session_scope
+    from app.models import Job
+
+    with session_scope() as session:
+        vorher = notify.fingerprint(session)
+        session.add(Job(source_path="/tmp/fingerprint.mkv", filename="fingerprint.mkv", status="waiting"))
+    with session_scope() as session:
+        nachher = notify.fingerprint(session)
+    assert vorher != nachher
+
+    with session_scope() as session:
+        assert notify.fingerprint(session) == nachher, "ohne Aenderung muss er gleich bleiben"
+
+
+def test_stream_generator_sends_a_change(client):
+    """Der Generator wird direkt geprüft, ein offener Strom im Testclient blockiert."""
+    import asyncio
+
+    from app.api import routes
+
+    async def zwei_stuecke():
+        strom = routes.stream_generator()
+        try:
+            erstes = await asyncio.wait_for(strom.__anext__(), timeout=10)
+            zweites = await asyncio.wait_for(strom.__anext__(), timeout=10)
+            return erstes, zweites
+        finally:
+            await strom.aclose()
+
+    erstes, zweites = asyncio.run(zwei_stuecke())
+    assert erstes.startswith("retry:")
+    assert zweites.startswith("event: change")
+    assert "version" in zweites

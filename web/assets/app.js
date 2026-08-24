@@ -11,6 +11,8 @@ const state = {
   scanShare: 0,
   settings: null,
   timer: null,
+  stream: null,
+  version: null,
 };
 
 const VIEWS = {
@@ -1055,11 +1057,67 @@ function boot() {
 
   refreshStatus().then(() => render({ entering: true }));
   setInterval(() => { if (!document.hidden) tickScanTimer(); }, 1000);
-  state.timer = setInterval(async () => {
-    if (document.hidden) return;
-    await refreshStatus();
-    if (!state.paused && LIVE_VIEWS.has(state.view)) await render();
-  }, 7000);
+  connectStream();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshAndRender();
+  });
+}
+
+/* --------------------------------------------------------- Aktualisierung */
+
+async function refreshAndRender() {
+  await refreshStatus();
+  if (!state.paused && LIVE_VIEWS.has(state.view)) await render();
+}
+
+// Der Server meldet sich, wenn sich wirklich etwas geändert hat. Die Umfrage im
+// Sekundentakt entfällt damit, sie bleibt nur als Rückfallebene bestehen.
+function connectStream() {
+  if (!("EventSource" in window)) { startFallbackPolling(15000); return; }
+
+  const source = new EventSource("/api/stream");
+  let watchdog = null;
+  let beendet = false;
+
+  // Läuft auch, wenn die Verbindung nie zustande kam. Sonst bliebe das
+  // Dashboard ohne Strom und ohne Umfrage einfach stehen.
+  const onDrop = () => {
+    if (beendet) return;
+    beendet = true;
+    clearTimeout(watchdog);
+    try { source.close(); } catch (error) { /* schon zu */ }
+    if (state.stream === source) state.stream = null;
+    startFallbackPolling(10000);
+    setTimeout(connectStream, 20000);
+  };
+
+  const arm = () => {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(onDrop, 45000);  // 45 s ohne ein Lebenszeichen
+  };
+
+  arm();
+  source.onopen = () => { state.stream = source; stopFallbackPolling(); arm(); };
+  source.onmessage = arm;
+  source.onerror = onDrop;
+  source.addEventListener("change", async (event) => {
+    arm();
+    try {
+      const payload = JSON.parse(event.data || "{}");
+      if (payload.version && payload.version === state.version) return;
+      state.version = payload.version;
+    } catch (error) { /* dann eben ohne Versionsvergleich */ }
+    await refreshAndRender();
+  });
+}
+
+function startFallbackPolling(interval) {
+  if (state.timer) return;
+  state.timer = setInterval(() => { if (!document.hidden) refreshAndRender(); }, interval);
+}
+
+function stopFallbackPolling() {
+  if (state.timer) { clearInterval(state.timer); state.timer = null; }
 }
 
 boot();
