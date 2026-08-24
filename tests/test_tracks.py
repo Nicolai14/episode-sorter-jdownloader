@@ -142,3 +142,18 @@ def test_mode_is_only_copied_when_the_original_has_read_bits(tmp_path, monkeypat
 
     t.remux(plan, dry_run=False)
     assert aufrufe == [], "bei Modus 000 darf kein chmod passieren"
+
+
+def test_duration_tolerance_scales_with_the_runtime(tmp_path, monkeypatch):
+    """Faellt eine Tonspur weg, die etwas laenger lief als das Video, wird die Datei
+    rechnerisch ein paar Sekunden kuerzer. Ein echter Abbruch reisst Minuten."""
+    from app.core import tracks as t
+
+    video = Stream(0, "video", "h264", "", "", None, True, False, 8000.0, True)
+    monkeypatch.setattr(t, "probe", lambda p: ([video], 5730.0, {}))
+    knapp = t._verify([video], [0], tmp_path / "x.mkv", 5734.7)
+    assert knapp is None, "4,7 Sekunden bei 96 Minuten sind normal"
+
+    monkeypatch.setattr(t, "probe", lambda p: ([video], 6479.6, {}))
+    grob = t._verify([video], [0], tmp_path / "x.mkv", 6971.0)
+    assert grob and "Laufzeit" in grob, "acht Minuten fehlen ist ein Abbruch"

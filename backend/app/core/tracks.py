@@ -240,8 +240,14 @@ def _verify(source_streams: list[Stream], expected_keep: list[int], temp: Path,
     streams, new_duration, _fmt = probe(temp)
     if not streams:
         return "neue Datei liefert keine Spuren"
-    if abs(new_duration - duration) > 1.5:
-        return f"Laufzeit weicht ab ({new_duration:.1f} statt {duration:.1f} Sekunden)"
+    # Die Containerlaufzeit richtet sich nach der laengsten Spur. Faellt eine Spur
+    # weg, die ein paar Sekunden ueber das Video hinauslief, wird die Datei
+    # rechnerisch kuerzer, ohne dass Inhalt fehlt. Ein echter Abbruch reisst eine
+    # deutlich groessere Luecke.
+    toleranz = max(2.0, duration * 0.0025)
+    if abs(new_duration - duration) > toleranz:
+        return (f"Laufzeit weicht ab ({new_duration:.1f} statt {duration:.1f} Sekunden, "
+                f"erlaubt waeren {toleranz:.0f})")
     if len(streams) != len(expected_keep):
         return f"{len(streams)} Spuren statt der erwarteten {len(expected_keep)}"
     old_video = [s for s in source_streams if s.kind == "video"]
