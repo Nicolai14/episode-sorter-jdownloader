@@ -433,7 +433,8 @@ a { color: var(--accent); }
 .chip[data-state="planned"], .chip[data-state="ready"] { color: var(--info); border-color: oklch(0.42 0.05 230); }
 .chip[data-state="waiting"], .chip[data-state="analyzing"], .chip[data-state="moving"] { color: var(--warn); border-color: oklch(0.44 0.06 88); }
 
-.meter { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; font-size: 0.82rem; }
+.meter { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; font-size: 0.82rem; cursor: help; }
+.meter-value { color: var(--muted); }
 .meter-bar { width: 52px; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .meter-fill { display: block; height: 100%; background: var(--accent); transform-origin: left; }
 .meter-fill[data-level="high"] { background: var(--ok); }

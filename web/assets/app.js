@@ -39,6 +39,9 @@ const STATUS_LABEL = {
 
 const MEDIA_LABEL = { anime: "Anime", series: "Serie", movie: "Film", unknown: "unbekannt" };
 
+// Fertige Jobs: die Erkennungssicherheit sagt danach nichts mehr aus.
+const TERMINAL = new Set(["done", "skipped"]);
+
 /* ------------------------------------------------------------------ utils */
 
 const esc = (value) =>
@@ -99,7 +102,10 @@ function bytes(value) {
 function meter(confidence) {
   const value = Math.round(confidence || 0);
   const level = value >= 85 ? "high" : value >= 55 ? "mid" : "low";
-  return `<span class="meter"><span class="meter-bar"><span class="meter-fill" data-level="${level}" style="width:${Math.max(4, value)}%"></span></span>${value}%</span>`;
+  const hinweis = `Sicherheit der Erkennung: ${value} Prozent. Das ist kein Fortschritt.`;
+  return `<span class="meter" title="${hinweis}" aria-label="${hinweis}">`
+    + `<span class="meter-bar"><span class="meter-fill" data-level="${level}" style="width:${Math.max(4, value)}%"></span></span>`
+    + `<span class="meter-value">${value}%</span></span>`;
 }
 
 function chip(status) {
@@ -299,15 +305,13 @@ function jobRow(job) {
       </div>
       <div class="path">${target}</div>
       <div>${chip(job.status)}<div class="row-sub">${relTime(job.updated_at)}</div></div>
-      <div class="row-meter">${meter(job.confidence)}</div>
+      <div class="row-meter">${TERMINAL.has(job.status) ? "" : meter(job.confidence)}</div>
       <div class="row-actions">
         <button class="btn btn-small" data-action="toggle" data-job="${job.id}">${state.openJob === job.id ? "Schließen" : "Details"}</button>
       </div>
       ${state.openJob === job.id ? jobDetail(job) : ""}
     </article>`;
 }
-
-const TERMINAL = new Set(["done", "skipped"]);
 
 function jobDetail(job) {
   const parse = job.parse_debug || {};
