@@ -42,6 +42,7 @@ class Stream:
     forced: bool
     bitrate_kbps: float
     bitrate_measured: bool
+    duration: float = 0.0
 
     @property
     def is_german(self) -> bool:
@@ -84,6 +85,24 @@ class Plan:
 
 def _tag(stream: dict[str, Any], name: str) -> str:
     return str((stream.get("tags") or {}).get(name) or "").strip()
+
+
+def _stream_duration(stream: dict[str, Any]) -> float:
+    """Laufzeit einer einzelnen Spur, aus dem Feld oder aus dem Matroska-Tag."""
+    direct = stream.get("duration")
+    if direct:
+        try:
+            return float(direct)
+        except (TypeError, ValueError):
+            pass
+    roh = _tag(stream, "DURATION") or _tag(stream, "DURATION-eng")
+    if roh and ":" in roh:
+        try:
+            stunden, minuten, sekunden = roh.split(":")
+            return int(stunden) * 3600 + int(minuten) * 60 + float(sekunden)
+        except ValueError:
+            return 0.0
+    return 0.0
 
 
 def _bitrate(stream: dict[str, Any], duration: float) -> tuple[float, bool]:
@@ -129,6 +148,7 @@ def probe(path: Path) -> tuple[list[Stream], float, dict[str, Any]]:
             forced=bool(disposition.get("forced")),
             bitrate_kbps=round(rate, 1),
             bitrate_measured=measured,
+            duration=_stream_duration(raw),
         ))
     return streams, duration, payload.get("format") or {}
 
@@ -241,14 +261,16 @@ def _verify(source_streams: list[Stream], expected_keep: list[int], temp: Path,
     streams, new_duration, _fmt = probe(temp)
     if not streams:
         return "neue Datei liefert keine Spuren"
-    # Die Containerlaufzeit richtet sich nach der laengsten Spur. Faellt eine Spur
-    # weg, die ein paar Sekunden ueber das Video hinauslief, wird die Datei
-    # rechnerisch kuerzer, ohne dass Inhalt fehlt. Ein echter Abbruch reisst eine
-    # deutlich groessere Luecke.
+    # Die Containerlaufzeit richtet sich nach der laengsten Spur. Faellt die
+    # laengste weg, etwa ein englischer Untertitel der eine Minute ueber das Video
+    # hinauslief, wird die Datei rechnerisch kuerzer, ohne dass Inhalt fehlt.
+    # Verglichen wird deshalb gegen die laengste Spur, die bleiben soll.
+    behalten = [s for s in source_streams if s.index in expected_keep and s.duration > 0]
+    mindestens = max((s.duration for s in behalten), default=0.0) or duration
     toleranz = max(2.0, duration * 0.0025)
-    if abs(new_duration - duration) > toleranz:
-        return (f"Laufzeit weicht ab ({new_duration:.1f} statt {duration:.1f} Sekunden, "
-                f"erlaubt waeren {toleranz:.0f})")
+    if not (mindestens - toleranz <= new_duration <= duration + toleranz):
+        return (f"Laufzeit weicht ab ({new_duration:.1f} Sekunden, erwartet zwischen "
+                f"{mindestens - toleranz:.1f} und {duration + toleranz:.1f})")
     # Datenspuren zaehlen nicht mit. MP4 traegt oft eine bin_data- oder
     # Timecode-Spur, und ffmpeg legt beim Schreiben selbst eine an. Nur Bild, Ton
     # und Untertitel muessen uebereinstimmen.

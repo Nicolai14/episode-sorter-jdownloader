@@ -7,10 +7,10 @@ SIZE = 1_400_000_000
 
 
 def stream(index, kind="audio", codec="aac", language="", title="", channels=2,
-           bitrate=192.0, measured=True, forced=False, default=False):
+           bitrate=192.0, measured=True, forced=False, default=False, duration=0.0):
     return Stream(index=index, kind=kind, codec=codec, language=language, title=title,
                   channels=channels, default=default, forced=forced,
-                  bitrate_kbps=bitrate, bitrate_measured=measured)
+                  bitrate_kbps=bitrate, bitrate_measured=measured, duration=duration)
 
 
 def video(index=0):
@@ -123,12 +123,12 @@ def test_mode_is_only_copied_when_the_original_has_read_bits(tmp_path, monkeypat
     quelle = tmp_path / "film.mkv"
     quelle.write_bytes(b"x" * 2048)
     plan = t.Plan(path=str(quelle), size=2048, keep=[0, 1], drop=[2],
-                  streams=[Stream(0, "video", "h264", "", "", None, True, False, 8000.0, True)])
+                  streams=[stream(0, kind="video", codec="h264", bitrate=8000.0)])
 
     os.chmod(quelle, 0o000)  # vor dem Abfangen von chmod, sonst greift es nicht
     aufrufe = []
     monkeypatch.setattr(t.os, "chmod", lambda p, m: aufrufe.append(m))
-    monkeypatch.setattr(t, "probe", lambda p: ([Stream(0, "video", "h264", "", "", None, True, False, 8000.0, True)], 60.0, {}))
+    monkeypatch.setattr(t, "probe", lambda p: ([stream(0, kind="video", codec="h264", bitrate=8000.0)], 60.0, {}))
     monkeypatch.setattr(t.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 0, "stderr": b""})())
     monkeypatch.setattr(t, "_verify", lambda *a, **k: None)
     monkeypatch.setattr(t.shutil, "disk_usage", lambda p: type("D", (), {"free": 10**12})())
@@ -144,12 +144,32 @@ def test_mode_is_only_copied_when_the_original_has_read_bits(tmp_path, monkeypat
     assert aufrufe == [], "bei Modus 000 darf kein chmod passieren"
 
 
+def test_dropping_the_longest_track_is_not_a_shortened_file(tmp_path, monkeypatch):
+    """Der englische Untertitel lief eine Minute laenger als das Video und bestimmte
+    damit die Containerlaufzeit. Faellt er weg, ist die Datei kuerzer ohne Verlust."""
+    from app.core import tracks as t
+
+    quelle = [
+        stream(0, kind="video", codec="h264", bitrate=3000.0, duration=1449.0),
+        stream(1, language="ger", duration=1450.0),
+        stream(2, kind="subtitle", codec="ass", language="ger", bitrate=20.0, duration=1449.3),
+        stream(3, kind="subtitle", codec="ass", language="eng", bitrate=20.0, duration=1508.6),
+    ]
+    neu = [s for s in quelle if s.index != 3]
+    monkeypatch.setattr(t, "probe", lambda p: (neu, 1455.8, {}))
+    assert t._verify(quelle, [0, 1, 2], tmp_path / "x.mkv", 1509.9) is None
+
+    # Fehlt dagegen wirklich Inhalt, faellt es weiterhin auf
+    monkeypatch.setattr(t, "probe", lambda p: (neu, 900.0, {}))
+    assert t._verify(quelle, [0, 1, 2], tmp_path / "x.mkv", 1509.9)
+
+
 def test_duration_tolerance_scales_with_the_runtime(tmp_path, monkeypatch):
     """Faellt eine Tonspur weg, die etwas laenger lief als das Video, wird die Datei
     rechnerisch ein paar Sekunden kuerzer. Ein echter Abbruch reisst Minuten."""
     from app.core import tracks as t
 
-    video = Stream(0, "video", "h264", "", "", None, True, False, 8000.0, True)
+    video = stream(0, kind="video", codec="h264", bitrate=8000.0)
     monkeypatch.setattr(t, "probe", lambda p: ([video], 5730.0, {}))
     knapp = t._verify([video], [0], tmp_path / "x.mkv", 5734.7)
     assert knapp is None, "4,7 Sekunden bei 96 Minuten sind normal"
@@ -165,17 +185,17 @@ def test_data_streams_do_not_break_the_check(tmp_path, monkeypatch):
     from app.core import tracks as t
 
     quelle = [
-        Stream(0, "video", "h264", "", "", None, True, False, 3000.0, True),
-        Stream(1, "audio", "aac", "ger", "", 2, True, False, 192.0, True),
-        Stream(2, "audio", "aac", "jpn", "", 2, False, False, 192.0, True),
-        Stream(4, "data", "bin_data", "", "", None, False, False, 1.0, False),
+        stream(0, kind="video", codec="h264", bitrate=3000.0),
+        stream(1, language="ger"),
+        stream(2, language="jpn"),
+        stream(4, kind="data", codec="bin_data", bitrate=1.0, measured=False),
     ]
     neu = [
-        Stream(0, "video", "h264", "", "", None, True, False, 3000.0, True),
-        Stream(1, "audio", "aac", "ger", "", 2, True, False, 192.0, True),
-        Stream(2, "audio", "aac", "jpn", "", 2, False, False, 192.0, True),
-        Stream(3, "data", "bin_data", "", "", None, False, False, 1.0, False),
-        Stream(4, "data", "timecode", "", "", None, False, False, 1.0, False),
+        stream(0, kind="video", codec="h264", bitrate=3000.0),
+        stream(1, language="ger"),
+        stream(2, language="jpn"),
+        stream(3, kind="data", codec="bin_data", bitrate=1.0, measured=False),
+        stream(4, kind="data", codec="timecode", bitrate=1.0, measured=False),
     ]
     monkeypatch.setattr(t, "probe", lambda p: (neu, 1440.0, {}))
     assert t._verify(quelle, [0, 1, 2, 4], tmp_path / "x.mp4", 1440.0) is None
