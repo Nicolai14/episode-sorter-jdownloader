@@ -173,7 +173,12 @@ function renderStatusLine() {
 
   const sources = status.metadata_sources || {};
   const NAMES = { tmdb: "TMDb", anilist: "AniList", jikan: "MyAnimeList" };
-  const down = Object.entries(sources).filter(([, value]) => value && value.ok === false);
+  // AniList und MyAnimeList sind Ersatz füreinander. Antwortet eine von beiden,
+  // ist nichts kaputt und es gibt nichts zu melden.
+  const ANIME_QUELLEN = ["anilist", "jikan"];
+  const animeOk = ANIME_QUELLEN.some((key) => sources[key] && sources[key].ok);
+  const down = Object.entries(sources).filter(([key, value]) =>
+    value && value.ok === false && !(animeOk && ANIME_QUELLEN.includes(key)));
   if (down.length) {
     const labels = down.map(([key]) => NAMES[key] || key).join(", ");
     const why = down.map(([key, value]) => `${NAMES[key] || key}: ${value.error || "unbekannt"}`).join(" | ");
