@@ -6,6 +6,7 @@ there is no quality loss at all.
 """
 from __future__ import annotations
 
+import collections
 import json
 import os
 import shutil
@@ -248,8 +249,18 @@ def _verify(source_streams: list[Stream], expected_keep: list[int], temp: Path,
     if abs(new_duration - duration) > toleranz:
         return (f"Laufzeit weicht ab ({new_duration:.1f} statt {duration:.1f} Sekunden, "
                 f"erlaubt waeren {toleranz:.0f})")
-    if len(streams) != len(expected_keep):
-        return f"{len(streams)} Spuren statt der erwarteten {len(expected_keep)}"
+    # Datenspuren zaehlen nicht mit. MP4 traegt oft eine bin_data- oder
+    # Timecode-Spur, und ffmpeg legt beim Schreiben selbst eine an. Nur Bild, Ton
+    # und Untertitel muessen uebereinstimmen.
+    zaehlbar = {"video", "audio", "subtitle"}
+    erwartet = collections.Counter(
+        s.kind for s in source_streams if s.index in expected_keep and s.kind in zaehlbar)
+    vorhanden = collections.Counter(s.kind for s in streams if s.kind in zaehlbar)
+    if erwartet != vorhanden:
+        fehlend = ", ".join(f"{art}: {erwartet[art]} statt {vorhanden[art]}"
+                            for art in sorted(set(erwartet) | set(vorhanden))
+                            if erwartet[art] != vorhanden[art])
+        return f"Spuren stimmen nicht ({fehlend})"
     old_video = [s for s in source_streams if s.kind == "video"]
     new_video = [s for s in streams if s.kind == "video"]
     if len(old_video) != len(new_video):

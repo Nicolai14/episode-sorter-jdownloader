@@ -157,3 +157,30 @@ def test_duration_tolerance_scales_with_the_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(t, "probe", lambda p: ([video], 6479.6, {}))
     grob = t._verify([video], [0], tmp_path / "x.mkv", 6971.0)
     assert grob and "Laufzeit" in grob, "acht Minuten fehlen ist ein Abbruch"
+
+
+def test_data_streams_do_not_break_the_check(tmp_path, monkeypatch):
+    """MP4 traegt oft eine Datenspur, und ffmpeg legt beim Schreiben selbst eine an.
+    Gezaehlt werden nur Bild, Ton und Untertitel."""
+    from app.core import tracks as t
+
+    quelle = [
+        Stream(0, "video", "h264", "", "", None, True, False, 3000.0, True),
+        Stream(1, "audio", "aac", "ger", "", 2, True, False, 192.0, True),
+        Stream(2, "audio", "aac", "jpn", "", 2, False, False, 192.0, True),
+        Stream(4, "data", "bin_data", "", "", None, False, False, 1.0, False),
+    ]
+    neu = [
+        Stream(0, "video", "h264", "", "", None, True, False, 3000.0, True),
+        Stream(1, "audio", "aac", "ger", "", 2, True, False, 192.0, True),
+        Stream(2, "audio", "aac", "jpn", "", 2, False, False, 192.0, True),
+        Stream(3, "data", "bin_data", "", "", None, False, False, 1.0, False),
+        Stream(4, "data", "timecode", "", "", None, False, False, 1.0, False),
+    ]
+    monkeypatch.setattr(t, "probe", lambda p: (neu, 1440.0, {}))
+    assert t._verify(quelle, [0, 1, 2, 4], tmp_path / "x.mp4", 1440.0) is None
+
+    fehlt_ton = [s for s in neu if not (s.kind == "audio" and s.language == "jpn")]
+    monkeypatch.setattr(t, "probe", lambda p: (fehlt_ton, 1440.0, {}))
+    problem = t._verify(quelle, [0, 1, 2, 4], tmp_path / "x.mp4", 1440.0)
+    assert problem and "audio" in problem
