@@ -265,7 +265,10 @@ def _verify(source_streams: list[Stream], expected_keep: list[int], temp: Path,
     # laengste weg, etwa ein englischer Untertitel der eine Minute ueber das Video
     # hinauslief, wird die Datei rechnerisch kuerzer, ohne dass Inhalt fehlt.
     # Verglichen wird deshalb gegen die laengste Spur, die bleiben soll.
-    behalten = [s for s in source_streams if s.index in expected_keep and s.duration > 0]
+    # Nur echte Zeitspuren zaehlen. Angehaengte Schriftarten haben keine Laufzeit,
+    # ffprobe schreibt ihnen aber die Containerlaufzeit zu.
+    behalten = [s for s in source_streams
+                if s.index in expected_keep and s.duration > 0 and s.kind in {"video", "audio", "subtitle"}]
     mindestens = max((s.duration for s in behalten), default=0.0) or duration
     toleranz = max(2.0, duration * 0.0025)
     if not (mindestens - toleranz <= new_duration <= duration + toleranz):

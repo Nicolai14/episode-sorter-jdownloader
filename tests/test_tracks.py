@@ -155,13 +155,15 @@ def test_dropping_the_longest_track_is_not_a_shortened_file(tmp_path, monkeypatc
         stream(2, kind="subtitle", codec="ass", language="ger", bitrate=20.0, duration=1449.3),
         stream(3, kind="subtitle", codec="ass", language="eng", bitrate=20.0, duration=1508.6),
     ]
+    # Angehaengte Schriftarten tragen die Containerlaufzeit, obwohl sie keine haben
+    quelle.append(stream(4, kind="attachment", codec="ttf", bitrate=0.0, duration=1509.9))
     neu = [s for s in quelle if s.index != 3]
     monkeypatch.setattr(t, "probe", lambda p: (neu, 1455.8, {}))
-    assert t._verify(quelle, [0, 1, 2], tmp_path / "x.mkv", 1509.9) is None
+    assert t._verify(quelle, [0, 1, 2, 4], tmp_path / "x.mkv", 1509.9) is None
 
     # Fehlt dagegen wirklich Inhalt, faellt es weiterhin auf
     monkeypatch.setattr(t, "probe", lambda p: (neu, 900.0, {}))
-    assert t._verify(quelle, [0, 1, 2], tmp_path / "x.mkv", 1509.9)
+    assert t._verify(quelle, [0, 1, 2, 4], tmp_path / "x.mkv", 1509.9)
 
 
 def test_duration_tolerance_scales_with_the_runtime(tmp_path, monkeypatch):
