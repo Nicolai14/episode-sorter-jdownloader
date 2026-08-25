@@ -392,3 +392,28 @@ def test_a_file_already_at_the_target_counts_as_done(session, library_tree, stub
     pipeline.analyze(session, job)
     assert job.status == "done"
     assert "nachgetragen" in job.reason
+
+
+def test_the_same_show_from_two_sources_is_not_ambiguous(session, library_tree, monkeypatch):
+    """AniList liefert Spy x Family als Anime, TMDb dieselbe Serie als Serie. Gleicher
+    Titel, gleiches Jahr, also derselbe Stoff und keine offene Frage."""
+    def fake_lookup(title, hint, year=None):
+        return [
+            metadata.Candidate(source="anilist", external_id=1, media_type="anime", title="SPY x FAMILY",
+                               original_title=None, english_title="SPY x FAMILY", year=2022, score=1.0,
+                               anime_signal=True),
+            metadata.Candidate(source="tmdb", external_id=2, media_type="series", title="SPY x FAMILY",
+                               original_title=None, english_title="SPY x FAMILY", year=2022, score=1.0,
+                               anime_signal=True),
+        ], []
+
+    monkeypatch.setattr(pipeline.metadata, "lookup", fake_lookup)
+    monkeypatch.setattr(pipeline.metadata, "tmdb_season_plausible", lambda *args: (True, None))
+    library.reindex(session)
+    source = _make_file(library_tree["downloads"] / "sxf" / "Spy.x.Family.S02E05.Ger.Eng.Sub.1080p.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert "passen gleich gut" not in (job.reason or ""), job.reason
+    assert job.media_type == "anime"
+    assert job.status in {"planned", "ready", "done"}, job.reason

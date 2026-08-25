@@ -279,9 +279,11 @@ def analyze(session: Session, job: Job) -> Job:
                     and best.score >= 0.6
                     and runner_up.score >= 0.6
                     and abs(best.score - runner_up.score) < 0.05
+                    # Nur wirklich verschiedene Werke zaehlen. Dieselbe Serie kommt
+                    # aus AniList als Anime und aus TMDb als Serie, das ist keine
+                    # Mehrdeutigkeit sondern zwei Quellen ueber denselben Titel.
                     and (
                         title_key(best.title) != title_key(runner_up.title)
-                        or best.media_type != runner_up.media_type
                         or (best.year or 0) != (runner_up.year or 0)
                     )
                 ):
