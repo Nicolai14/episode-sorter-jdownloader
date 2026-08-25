@@ -6,9 +6,9 @@ apps on the box.
 | | |
 | --- | --- |
 | Dashboard, local | `http://<nas-ip>:18080` |
-| Dashboard, remote | `https://<hostname>`, behind Cloudflare Access |
+| Dashboard, remote | your own hostname on a Cloudflare tunnel, behind Cloudflare Access |
 | JDownloader, local | `http://<nas-ip>:5800` |
-| JDownloader, remote | `https://<hostname>`, behind Cloudflare Access, plus `my.jdownloader.org` |
+| JDownloader, remote | a second tunnel hostname, plus `my.jdownloader.org` |
 | Download folder | `/mnt/SmallPool/dataGrepDataset/Downloads/JDownloader` |
 | Container user | `3000:0` (smb), so moved files stay usable over SMB |
 
@@ -19,7 +19,7 @@ One mount per pool, not one per folder. A rename only works inside a single moun
 separate mounts would turn every move within a pool into a full copy.
 
 ```bash
-ssh nas
+ssh <nas>
 cd /mnt/AppPool/DockerStacks/episode-sorter
 git pull && sudo docker compose build episode-sorter && sudo docker compose up -d
 sudo docker compose logs -f --tail 50 episode-sorter
