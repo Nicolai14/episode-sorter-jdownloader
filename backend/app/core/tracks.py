@@ -88,20 +88,24 @@ def _tag(stream: dict[str, Any], name: str) -> str:
 
 
 def _stream_duration(stream: dict[str, Any]) -> float:
-    """Laufzeit einer einzelnen Spur, aus dem Feld oder aus dem Matroska-Tag."""
-    direct = stream.get("duration")
-    if direct:
-        try:
-            return float(direct)
-        except (TypeError, ValueError):
-            pass
+    """Laufzeit einer einzelnen Spur.
+
+    Das Matroska-Tag zuerst: bei MKV liefert das Feld duration je Spur oft nur die
+    Containerlaufzeit, das Tag dagegen den echten Wert der Spur.
+    """
     roh = _tag(stream, "DURATION") or _tag(stream, "DURATION-eng")
     if roh and ":" in roh:
         try:
             stunden, minuten, sekunden = roh.split(":")
             return int(stunden) * 3600 + int(minuten) * 60 + float(sekunden)
         except ValueError:
-            return 0.0
+            pass
+    direct = stream.get("duration")
+    if direct:
+        try:
+            return float(direct)
+        except (TypeError, ValueError):
+            pass
     return 0.0
 
 

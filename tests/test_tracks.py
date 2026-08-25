@@ -206,3 +206,13 @@ def test_data_streams_do_not_break_the_check(tmp_path, monkeypatch):
     monkeypatch.setattr(t, "probe", lambda p: (fehlt_ton, 1440.0, {}))
     problem = t._verify(quelle, [0, 1, 2, 4], tmp_path / "x.mp4", 1440.0)
     assert problem and "audio" in problem
+
+
+def test_matroska_tag_beats_the_stream_duration_field():
+    """Bei MKV meldet das Feld duration je Spur oft nur die Containerlaufzeit."""
+    from app.core.tracks import _stream_duration
+
+    assert _stream_duration({"duration": "1510.0", "tags": {"DURATION": "00:20:36.230000"}}) == 1236.23
+    assert _stream_duration({"duration": "1450.0"}) == 1450.0
+    assert _stream_duration({"tags": {"DURATION": "01:02:03.500000"}}) == 3723.5
+    assert _stream_duration({}) == 0.0
