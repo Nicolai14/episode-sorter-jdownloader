@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .. import config
-from ..models import Event, JDPackage, Job, Rule, utcnow
+from ..models import Event, JDPackage, Job, LibraryItem, Rule, utcnow
 from . import files, jdownloader, library, mediainfo, metadata, mover, naming
 from .parser import ParseResult, parse, title_key
 
@@ -188,14 +188,67 @@ def _pick_media_type(
     return "series", None
 
 
-def _existing_episode(directory: Path, season: int | None, episode: int | None) -> str | None:
-    """Look for the same episode already sitting in the target folder."""
-    if episode is None or not directory.is_dir():
+def _existing_episode(
+    session: Session,
+    titles: list[str],
+    media_type: str,
+    season: int | None,
+    episode: int | None,
+    planned_dir: str | None,
+    matched_folder: str | None,
+    absolute_episode: int | None = None,
+) -> str | None:
+    """Sucht dieselbe Folge in allen Ordnern, die zu diesem Titel gehoeren.
+
+    Nicht nur im geplanten Zielordner: derselbe Titel kann in beiden Bibliotheken
+    liegen, die Folgen koennen flach oder in einem anders benannten Staffelordner
+    stehen, und der Dateiname der vorhandenen Folge sieht oft ganz anders aus.
+    Deshalb wird jeder Kandidat mit demselben Parser gelesen wie der Download.
+    """
+    if episode is None and absolute_episode is None:
         return None
-    pattern = re.compile(rf"(?i)s0*{season if season is not None else 1}e0*{episode}(?!\d)")
-    for entry in os.scandir(directory):
-        if entry.is_file() and pattern.search(entry.name):
-            return entry.path
+
+    wurzeln = {str(Path(pfad)) for pfad, _art in config.library_roots()}
+    ordner: list[Path] = []
+    if planned_dir:
+        pfad = Path(planned_dir)
+        ordner.append(pfad)
+        # Der Serienordner ueber dem Staffelordner gehoert dazu, die Bibliothekswurzel nicht.
+        if str(pfad.parent) not in wurzeln and pfad.parent != pfad:
+            ordner.append(pfad.parent)
+    if matched_folder:
+        ordner.append(Path(matched_folder))
+
+    # Jeder indexierte Ordner, der denselben Titel traegt, egal in welchem Pfad
+    schluessel = {title_key(t) for t in titles if t}
+    schluessel.discard("")
+    if schluessel:
+        for item in session.scalars(select(LibraryItem)):
+            if item.title_key in schluessel and item.media_type in {media_type, "anime", "series", "movie"}:
+                ordner.append(Path(item.path))
+
+    gesehen: set[str] = set()
+    for verzeichnis in ordner:
+        if not verzeichnis.is_dir() or str(verzeichnis) in gesehen:
+            continue
+        gesehen.add(str(verzeichnis))
+        for wurzel, unterordner, dateien in os.walk(verzeichnis):
+            unterordner[:] = [u for u in unterordner if not u.startswith(".")]
+            for name in dateien:
+                pfad = Path(wurzel) / name
+                if not files.is_video(pfad):
+                    continue
+                erkannt = parse(name, folder_name=Path(wurzel).name)
+                if episode is not None and erkannt.episode == episode:
+                    gleiche_staffel = (
+                        erkannt.season == season
+                        or (erkannt.season is None and season in (None, 1))
+                        or (season is None and erkannt.season in (None, 1))
+                    )
+                    if gleiche_staffel:
+                        return str(pfad)
+                if absolute_episode is not None and erkannt.absolute_episode == absolute_episode:
+                    return str(pfad)
     return None
 
 
@@ -375,7 +428,16 @@ def analyze(session: Session, job: Job) -> Job:
     if Path(plan.path).exists():
         duplicate = plan.path
     else:
-        duplicate = _existing_episode(Path(plan.directory), parsed.season, parsed.episode)
+        duplicate = _existing_episode(
+            session,
+            titles=titles,
+            media_type=media_type,
+            season=parsed.season,
+            episode=parsed.episode,
+            planned_dir=plan.directory,
+            matched_folder=existing_folder,
+            absolute_episode=parsed.absolute_episode,
+        )
     if duplicate:
         job.duplicate_of = duplicate
         job.duplicate_info = {
@@ -384,11 +446,11 @@ def analyze(session: Session, job: Job) -> Job:
         }
         job.status = "duplicate"
         job.reason = "Diese Folge liegt schon in der Bibliothek"
-        job.confidence = _confidence(parsed, best, folder_match, blockers)
+        job.confidence = _confidence(parsed, best, folder_match, blockers, rule_applied=bool(rule))
         log(session, f"Dublette gefunden für {job.filename}", level="warn", job_id=job.id)
         return job
 
-    job.confidence = _confidence(parsed, best, folder_match, blockers)
+    job.confidence = _confidence(parsed, best, folder_match, blockers, rule_applied=bool(rule))
     threshold = float(config.get("auto_threshold", 85))
 
     if blockers:
@@ -410,10 +472,16 @@ def _confidence(
     best: metadata.Candidate | None,
     folder_match: library.FolderMatch | None,
     blockers: list[str],
+    rule_applied: bool = False,
 ) -> float:
-    """Parse quality and metadata quality carry the score, the folder index tops it up."""
+    """Parse quality and metadata quality carry the score, the folder index tops it up.
+
+    Eine gespeicherte Regel ist eine Entscheidung, die der Benutzer selbst getroffen
+    hat, und zaehlt deshalb wie ein voller Metadatentreffer. Sonst landet jede Datei
+    trotz Regel wieder in der Entscheidungsliste.
+    """
     parse_part = 0.45 * parsed.score
-    metadata_part = 0.55 * (best.score if best else 0.0)
+    metadata_part = 0.55 * (1.0 if rule_applied else (best.score if best else 0.0))
     score = (parse_part + metadata_part) * 100
     if folder_match:
         score += 8 if folder_match.score >= 0.999 else folder_match.score * 5

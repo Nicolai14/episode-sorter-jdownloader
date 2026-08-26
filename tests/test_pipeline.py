@@ -431,3 +431,75 @@ def test_system_folders_are_not_indexed_as_titles(session, library_tree):
     assert "Echte Serie (2020)" in namen
     assert "ix_volumes" not in namen
     assert ".system" not in namen
+
+
+def test_duplicate_found_in_a_differently_named_season_folder(session, library_tree, stub_metadata):
+    """Die vorhandene Folge liegt in S2, geplant wird nach Season 02, und sie heisst
+    voellig anders. Trotzdem ist es dieselbe Folge."""
+    ordner = library_tree["anime_one"] / "Attack on Titan (2013)" / "S2"
+    ordner.mkdir(parents=True)
+    (ordner / "[Zero] Attack on Titan - 2x07 [1080p].mkv").write_bytes(b"alt")
+    library.reindex(session)
+
+    source = _make_file(library_tree["downloads"] / "dup1" / "Attack.On.Titan.S02E07.German.1080p.WEB.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.status == "duplicate", job.reason
+    assert "2x07" in (job.duplicate_of or "")
+
+
+def test_duplicate_found_in_the_other_library(session, library_tree, stub_metadata, set_config):
+    """Derselbe Titel liegt in beiden Anime-Pfaden. Die Folge im anderen Pfad zaehlt auch."""
+    zweiter = library_tree["anime_two"] / "Attack on Titan (2013)" / "S3"
+    zweiter.mkdir(parents=True)
+    (zweiter / "Attack on Titan (2013) - S03E05.mkv").write_bytes(b"alt")
+    erster = library_tree["anime_one"] / "Attack on Titan (2013)" / "S3"
+    erster.mkdir(parents=True)
+    (erster / "Attack on Titan (2013) - S03E01.mkv").write_bytes(b"alt")
+    library.reindex(session)
+
+    source = _make_file(library_tree["downloads"] / "dup2" / "Attack.On.Titan.S03E05.German.1080p.WEB.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.status == "duplicate", job.reason
+    assert str(zweiter) in (job.duplicate_of or "")
+
+
+def test_a_new_episode_is_not_a_duplicate(session, library_tree, stub_metadata):
+    """Gegenprobe: eine Folge, die es noch nicht gibt, darf nicht als Dublette gelten."""
+    from app.models import Rule
+    session.execute(pipeline.delete(Rule))  # Regeln aus anderen Tests stoeren hier
+    ordner = library_tree["anime_one"] / "Attack on Titan (2013)" / "S2"
+    ordner.mkdir(parents=True)
+    (ordner / "Attack on Titan (2013) - S02E06.mkv").write_bytes(b"alt")
+    library.reindex(session)
+
+    source = _make_file(library_tree["downloads"] / "dup3" / "Attack.On.Titan.S02E08.German.1080p.WEB.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.status in {"planned", "ready", "done"}, f"{job.status}: {job.reason} | {job.duplicate_of}"
+    assert not job.duplicate_of
+
+
+def test_a_saved_rule_actually_automates(session, library_tree, monkeypatch):
+    """Eine Regel ist eine Entscheidung des Benutzers. Mit ihr darf die Datei nicht
+    erneut in der Entscheidungsliste landen."""
+    from app.models import Rule
+
+    monkeypatch.setattr(pipeline.metadata, "lookup",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("bei einer Regel wird nicht abgefragt")))
+    session.add(Rule(match_kind="title", pattern="beispielserie", media_type="anime",
+                     title="Beispielserie", year=2024))
+    session.flush()
+    library.reindex(session)
+
+    source = _make_file(library_tree["downloads"] / "regel" / "Beispielserie.S01E04.German.1080p.WEB.mkv")
+    _run(session)
+
+    job = session.scalars(pipeline.select(Job).where(Job.source_path == str(source))).one()
+    assert job.status in {"planned", "ready", "done"}, f"{job.status}: {job.reason}"
+    assert job.confidence >= 85, job.confidence
+    assert job.media_type == "anime"
