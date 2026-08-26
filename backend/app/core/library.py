@@ -19,7 +19,12 @@ from .parser import TECH_TOKENS, parse as parse_release, title_key
 _FOLDER_YEAR = re.compile(r"^(?P<name>.+?)[\s._]*[\(\[](?P<year>19\d{2}|20\d{2})[\)\]]\s*$")
 _SEASON_DIR = re.compile(r"(?i)^(?:season|staffel|s)[\s._-]*(?P<n>\d{1,3})$")
 _SPECIALS_DIR = re.compile(r"(?i)^(?:specials?|extras?|ova|ovas)$")
-_SKIP_DIRS = {"@eadir", ".recycle", "#recycle", "lost+found", ".stfolder", ".git"}
+# Systemordner, die neben den Medien im selben Pfad liegen und keine Titel sind.
+_SKIP_DIRS = {
+    "@eadir", ".recycle", "#recycle", "lost+found", ".stfolder", ".git",
+    "ix_volumes", "ix-applications", ".system", "@snapshot", ".zfs", "$recycle.bin",
+    "system volume information",
+}
 
 
 @dataclass

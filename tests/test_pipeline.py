@@ -417,3 +417,17 @@ def test_the_same_show_from_two_sources_is_not_ambiguous(session, library_tree, 
     assert "passen gleich gut" not in (job.reason or ""), job.reason
     assert job.media_type == "anime"
     assert job.status in {"planned", "ready", "done"}, job.reason
+
+
+def test_system_folders_are_not_indexed_as_titles(session, library_tree):
+    """Neben den Medien liegen Systemordner von TrueNAS. Die sind keine Serien."""
+    (library_tree["series"] / "ix_volumes").mkdir(parents=True, exist_ok=True)
+    (library_tree["series"] / ".system").mkdir(parents=True, exist_ok=True)
+    (library_tree["series"] / "Echte Serie (2020)").mkdir(parents=True, exist_ok=True)
+    library.reindex(session)
+
+    from app.models import LibraryItem
+    namen = {item.folder_name for item in session.scalars(pipeline.select(LibraryItem))}
+    assert "Echte Serie (2020)" in namen
+    assert "ix_volumes" not in namen
+    assert ".system" not in namen
