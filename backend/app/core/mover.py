@@ -5,8 +5,11 @@ import errno
 import hashlib
 import os
 import shutil
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .. import config
 from . import files
@@ -16,6 +19,18 @@ CHUNK = 4 * 1024 * 1024
 
 class MoveError(RuntimeError):
     pass
+
+
+# Was gerade kopiert wird, je Thread ein Eintrag. Das Dashboard liest hier mit,
+# damit ein Kopiervorgang über mehrere Gigabyte nicht wie ein Hänger aussieht.
+_transfers: dict[int, dict[str, Any]] = {}
+_transfers_lock = threading.Lock()
+
+
+def active_transfers() -> list[dict[str, Any]]:
+    """Kopien der Einträge, damit niemand einen halb geschriebenen Wert liest."""
+    with _transfers_lock:
+        return [dict(entry) for entry in _transfers.values()]
 
 
 @dataclass
@@ -96,9 +111,26 @@ def move(source: Path, target: Path, *, dry_run: bool = False) -> MoveResult:
     temp = target.with_name(target.name + ".es-part")
     if temp.exists():
         temp.unlink()
+
+    key = threading.get_ident()
+    entry: dict[str, Any] = {
+        "name": target.name,
+        "total": size,
+        "copied": 0,
+        "phase": "kopieren",
+        "started_at": time.time(),
+    }
+    with _transfers_lock:
+        _transfers[key] = entry
     try:
         with source.open("rb") as src, temp.open("wb") as dst:
-            shutil.copyfileobj(src, dst, CHUNK)
+            while True:
+                block = src.read(CHUNK)
+                if not block:
+                    break
+                dst.write(block)
+                with _transfers_lock:
+                    entry["copied"] += len(block)
             dst.flush()
             os.fsync(dst.fileno())
         shutil.copystat(source, temp, follow_symlinks=True)
@@ -108,6 +140,9 @@ def move(source: Path, target: Path, *, dry_run: bool = False) -> MoveResult:
             raise MoveError(f"Größe stimmt nach dem Kopieren nicht ({temp.stat().st_size} statt {size})")
         verified = "Dateigröße"
         if verify_mode == "sha256":
+            with _transfers_lock:
+                entry["phase"] = "prüfen"
+                entry["copied"] = 0
             if _sha256(temp) != _sha256(source):
                 raise MoveError("Prüfsumme stimmt nach dem Kopieren nicht")
             verified = "SHA-256"
@@ -122,6 +157,9 @@ def move(source: Path, target: Path, *, dry_run: bool = False) -> MoveResult:
             except OSError:
                 pass
         raise
+    finally:
+        with _transfers_lock:
+            _transfers.pop(key, None)
 
     source.unlink()
     return MoveResult(str(source), str(target), "Kopieren und Prüfen", size, verified)

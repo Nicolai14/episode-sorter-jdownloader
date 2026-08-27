@@ -13,6 +13,11 @@ const state = {
   timer: null,
   stream: null,
   version: null,
+  activity: null,
+  transfers: [],
+  activityTimer: null,
+  gemeldet: new Set(),
+  anteilZuletzt: { id: null, wert: 0 },
 };
 
 const VIEWS = {
@@ -141,7 +146,151 @@ async function refreshStatus() {
   const toggle = qs("#dryRunToggle");
   if (document.activeElement !== toggle) toggle.checked = Boolean(state.status.dry_run);
 
+  // Nur übernehmen, solange die eigene Umfrage nicht läuft, sonst überschreibt
+  // der langsamere Status den frischeren Wert.
+  if (!state.activityTimer) {
+    state.activity = state.status.batch || null;
+    state.transfers = state.status.transfers || [];
+    renderActivity();
+    syncActivityPolling();
+  }
   renderStatusLine();
+}
+
+/* -------------------------------------------------------------- Fortschritt */
+
+function aktuellerTransfer() {
+  return (state.transfers || [])[0] || null;
+}
+
+function anteilDerDatei(transfer) {
+  if (!transfer || !transfer.total) return 0;
+  return Math.min(1, (transfer.copied || 0) / transfer.total);
+}
+
+function nurVorwaerts(id, anteil) {
+  // Zwischen zwei Dateien ist kurz keine Kopie unterwegs. Ohne diese Sperre
+  // fiele der Balken in dem Moment auf den Stand der fertigen Dateien zurück.
+  if (state.anteilZuletzt.id !== id) state.anteilZuletzt = { id, wert: 0 };
+  state.anteilZuletzt.wert = Math.max(state.anteilZuletzt.wert, Math.min(1, anteil));
+  return state.anteilZuletzt.wert;
+}
+
+function activityText() {
+  const batch = state.activity;
+  const transfer = aktuellerTransfer();
+  if (!batch && !transfer) return null;
+
+  if (!batch) {
+    // Einzelne Datei, etwa ein Klick auf "ersetzen" oder ein Lauf des Scheduler.
+    return {
+      key: `transfer:${transfer.name}`,
+      label: `${transfer.phase === "prüfen" ? "Prüft" : "Verschiebt"} eine Datei`,
+      detail: `${transfer.name} · ${Math.round(anteilDerDatei(transfer) * 100)} Prozent`,
+      anteil: anteilDerDatei(transfer),
+      tone: "live",
+      batchId: null,
+    };
+  }
+
+  const erledigt = (batch.done || 0) + (batch.failed || 0);
+  if (batch.finished_at) {
+    const fehler = batch.failed || 0;
+    return {
+      key: `batch:${batch.id}:fertig`,
+      label: batch.cancelled ? "Abgebrochen" : "Fertig",
+      detail: fehler
+        ? `${batch.done} von ${batch.total} ${batch.label}, ${plural(fehler, "Fehler", "Fehler")}`
+        : `${batch.done} von ${batch.total} ${batch.label}`,
+      anteil: 1,
+      tone: fehler ? "bad" : "good",
+      batchId: null,
+    };
+  }
+
+  const detail = [batch.current, transfer ? `${Math.round(anteilDerDatei(transfer) * 100)} Prozent` : null]
+    .filter(Boolean).join(" · ");
+  return {
+    key: `batch:${batch.id}`,
+    label: `${erledigt} von ${batch.total} ${batch.label}`,
+    detail: detail || "wird vorbereitet",
+    anteil: nurVorwaerts(batch.id, (erledigt + anteilDerDatei(transfer)) / Math.max(1, batch.total)),
+    tone: "live",
+    batchId: batch.id,
+  };
+}
+
+function renderActivity() {
+  const node = qs("#activity");
+  if (!node) return;
+  const info = activityText();
+  if (!info) {
+    node.hidden = true;
+    node.dataset.key = "";
+    node.innerHTML = "";
+    return;
+  }
+  node.hidden = false;
+  node.dataset.tone = info.tone;
+  // Nur neu bauen, wenn sich die Form ändert. Sonst würde der Abbrechen-Knopf
+  // jede Sekunde unter dem Zeiger neu entstehen.
+  if (node.dataset.key !== info.key) {
+    node.dataset.key = info.key;
+    node.innerHTML = `
+      <div class="activity-row">
+        <strong class="activity-label"></strong>
+        <span class="activity-detail"></span>
+        ${info.batchId ? `<button type="button" class="btn btn-small" data-action="batch-cancel" data-batch="${esc(info.batchId)}">Abbrechen</button>` : ""}
+      </div>
+      <span class="activity-track" aria-hidden="true"><span class="activity-fill"></span></span>`;
+  }
+  qs(".activity-label", node).textContent = info.label;
+  qs(".activity-detail", node).textContent = info.detail;
+  qs(".activity-fill", node).style.width = `${Math.round(info.anteil * 100)}%`;
+}
+
+function activityAktiv() {
+  const batch = state.activity;
+  if (batch && !batch.finished_at) return true;
+  if ((state.transfers || []).length) return true;
+  return Boolean(batch);  // fertiger Stapel bleibt kurz stehen, danach räumt der Server ihn weg
+}
+
+async function pollActivity() {
+  let payload;
+  try {
+    payload = await api("/api/activity");
+  } catch (error) {
+    return;  // ein Aussetzer beendet die Anzeige nicht
+  }
+  const vorher = state.activity;
+  state.activity = payload.batch;
+  state.transfers = payload.transfers || [];
+  renderActivity();
+
+  const batch = payload.batch;
+  if (batch && batch.finished_at && !state.gemeldet.has(batch.id)) {
+    state.gemeldet.add(batch.id);
+    const fehler = batch.failed || 0;
+    toast(fehler
+      ? `${batch.done} von ${batch.total} ${batch.label}, ${plural(fehler, "Fehler", "Fehler")}`
+      : `${batch.done} von ${batch.total} ${batch.label}`, fehler ? "bad" : "good");
+    await refreshAndRender();
+  } else if (vorher && batch && vorher.done !== batch.done) {
+    // Eine Datei ist durch, die Listen dürfen nachziehen.
+    await refreshStatus();
+  }
+  syncActivityPolling();
+}
+
+function syncActivityPolling() {
+  if (activityAktiv()) {
+    if (!state.activityTimer) state.activityTimer = setInterval(pollActivity, 1000);
+  } else if (state.activityTimer) {
+    clearInterval(state.activityTimer);
+    state.activityTimer = null;
+    renderActivity();
+  }
 }
 
 function statusItem(label, tone = "idle", title = "") {
@@ -482,6 +631,9 @@ function dublettenGruppe(gruppe) {
   const summe = gruppe.jobs.reduce((wert, job) => wert + (job.size_bytes || 0), 0);
   const staffel = gruppe.staffel === null ? "" : ` / Staffel ${String(gruppe.staffel).padStart(2, "0")}`;
   const ziel = gruppe.jobs[0].target_dir || "";
+  // Solange ein Stapel läuft, gäbe ein zweiter Klick nur einen zweiten Stapel.
+  const sperre = state.activity && !state.activity.finished_at
+    ? ' disabled title="Es läuft gerade ein Vorgang"' : "";
   return `
     <section class="block" data-gruppe="${esc(gruppe.titel)}">
       <div class="block-head">
@@ -491,10 +643,10 @@ function dublettenGruppe(gruppe) {
              <span class="path">${esc(ziel)}</span></p>
         </div>
         ${anzahl > 1 ? `<div class="row-actions">
-          <button class="btn btn-small" data-action="dup-gruppe" data-decision="duplicate_discard" data-ids="${ids}">Alle verwerfen</button>
-          <button class="btn btn-small" data-action="dup-gruppe" data-decision="duplicate_keep_both" data-ids="${ids}">Alle behalten</button>
+          <button class="btn btn-small" data-action="dup-gruppe" data-decision="duplicate_discard" data-ids="${ids}"${sperre}>Alle verwerfen</button>
+          <button class="btn btn-small" data-action="dup-gruppe" data-decision="duplicate_keep_both" data-ids="${ids}"${sperre}>Alle behalten</button>
           <button class="btn btn-small btn-danger" data-action="dup-gruppe" data-decision="duplicate_replace" data-ids="${ids}"
-                  data-frage="Alle ${anzahl} ersetzen?">Alle ersetzen</button>
+                  data-frage="Alle ${anzahl} ersetzen?"${sperre}>Alle ersetzen</button>
         </div>` : ""}
       </div>
       <div class="list">${gruppe.jobs.map(dublettenZeile).join("")}</div>
@@ -968,14 +1120,25 @@ async function onClick(event) {
       return;
     }
     await run(trigger, async () => {
-      const ergebnis = await api("/api/jobs/bulk", {
+      const stapel = await api("/api/jobs/bulk", {
         method: "POST",
         body: { action: trigger.dataset.decision, ids, payload: {} },
       });
-      toast(`${ergebnis.erledigt} von ${ids.length} erledigt${ergebnis.fehler ? `, ${ergebnis.fehler} Fehler` : ""}`,
-            ergebnis.fehler ? "bad" : "good");
-      await refreshStatus();
-      await render();
+      // Der Server arbeitet die Liste im Hintergrund ab. Die Leiste oben zeigt
+      // ab sofort, welche Folge gerade dran ist.
+      state.activity = stapel;
+      state.transfers = [];
+      renderActivity();
+      syncActivityPolling();
+      await refreshAndRender();
+    });
+    return;
+  }
+
+  if (action === "batch-cancel") {
+    await run(trigger, async () => {
+      await api(`/api/batches/${trigger.dataset.batch}/cancel`, { method: "POST" });
+      toast("Wird nach der laufenden Datei beendet");
     });
     return;
   }

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from .. import config
 from ..db import get_session
 from ..models import Event, JDPackage, Job, LibraryItem, Rule
-from ..core import jdownloader, library, mediainfo, metadata, notify, pipeline
+from ..core import batches, jdownloader, library, mediainfo, metadata, mover, notify, pipeline
 from ..core.files import human_size
 from ..core.scheduler import scheduler
 
@@ -147,6 +147,8 @@ def status(session: Session = Depends(get_session)) -> dict[str, Any]:
             "last_error": scheduler.last_error,
             "interval": config.get("scan_interval_seconds"),
         },
+        "batch": batches.latest(),
+        "transfers": mover.active_transfers(),
     }
 
 
@@ -154,7 +156,7 @@ def _fingerprint() -> str:
     from ..db import session_scope
 
     with session_scope() as session:
-        return notify.fingerprint(session)
+        return f"{notify.fingerprint(session)}|{batches.fingerprint()}"
 
 
 async def stream_generator():
@@ -249,22 +251,44 @@ def reanalyze(job_id: int, session: Session = Depends(get_session)) -> dict[str,
     return job_dict(job)
 
 
-@router.post("/jobs/bulk")
+@router.post("/jobs/bulk", status_code=202)
 def bulk(body: DecisionIn, ids: list[int] = Query(default=[]), session: Session = Depends(get_session)):
-    """Dieselbe Entscheidung für mehrere Jobs, etwa eine ganze Staffel auf einmal."""
-    results = []
-    for job_id in body.ids or ids:
-        job = session.get(Job, job_id)
-        if job is None:
-            continue
-        try:
-            pipeline.apply_decision(session, job, body.action, body.payload)
-            results.append({"id": job_id, "status": job.status})
-        except ValueError as exc:
-            results.append({"id": job_id, "error": str(exc)})
-    session.flush()
-    erledigt = [r for r in results if not r.get("error")]
-    return {"results": results, "erledigt": len(erledigt), "fehler": len(results) - len(erledigt)}
+    """Dieselbe Entscheidung für mehrere Jobs, etwa eine ganze Staffel auf einmal.
+
+    Läuft im Hintergrund, weil ein Ersetzen mehrere Gigabyte kopieren kann. Der
+    Fortschritt steht unter /api/batches/{id} und in /api/status.
+    """
+    gewuenscht = [int(job_id) for job_id in (body.ids or ids)]
+    if not gewuenscht:
+        raise HTTPException(status_code=400, detail="Keine Dateien angegeben")
+    bekannt = set(session.scalars(select(Job.id).where(Job.id.in_(gewuenscht))))
+    offen = [job_id for job_id in gewuenscht if job_id in bekannt]
+    if not offen:
+        raise HTTPException(status_code=404, detail="Keine der angegebenen Dateien gibt es noch")
+    return batches.start(body.action, body.payload, offen, scheduler.pass_lock)
+
+
+@router.get("/activity")
+def activity():
+    """Nur der Fortschritt, ohne Datenbank. Wird während eines Vorgangs im Sekundentakt geholt."""
+    return {"batch": batches.latest(), "transfers": mover.active_transfers()}
+
+
+@router.get("/batches/{batch_id}")
+def batch_status(batch_id: str):
+    state = batches.snapshot(batch_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Diesen Vorgang gibt es nicht mehr")
+    return state
+
+
+@router.post("/batches/{batch_id}/cancel")
+def batch_cancel(batch_id: str):
+    """Bricht nach der laufenden Datei ab, mittendrin wird nie abgebrochen."""
+    state = batches.cancel(batch_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Diesen Vorgang gibt es nicht mehr")
+    return state
 
 
 @router.delete("/jobs/{job_id}")

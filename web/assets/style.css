@@ -704,3 +704,60 @@ details[open] > .list, details[open] > .more { animation: rise var(--dur) var(--
   }
   .btn.is-busy::after { animation: none; border-top-color: currentColor; opacity: 0.5; }
 }
+
+/* Was gerade wirklich passiert. Steht über allen Ansichten, weil ein Verschieben
+   von mehreren Gigabyte sonst wie ein Hänger aussieht. */
+.activity {
+  margin: 18px 28px -8px;
+  padding: 11px 14px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-1), var(--inset-hi);
+  animation: rise var(--dur) var(--ease-out);
+}
+.activity[hidden] { display: none; }
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  font-size: 0.85rem;
+}
+.activity-label { color: var(--text); }
+.activity-detail {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-track {
+  display: block;
+  height: 3px;
+  margin: 0 -14px;
+  border-radius: 0 0 var(--radius) var(--radius);
+  overflow: hidden;
+  background: var(--line-soft);
+}
+.activity-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 320ms var(--ease-out);
+}
+.activity[data-tone="good"] .activity-fill { background: var(--ok); }
+.activity[data-tone="bad"] .activity-fill { background: var(--danger); }
+
+@media (prefers-reduced-motion: reduce) {
+  .activity { animation: none; }
+  .activity-fill { transition: none; }
+}
+
+@media (max-width: 720px) {
+  .activity { margin: 14px 16px -10px; }
+  .activity-row { flex-wrap: wrap; gap: 6px 10px; }
+}

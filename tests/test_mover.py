@@ -47,11 +47,41 @@ def test_failed_copy_keeps_the_source(tmp_path, monkeypatch):
     source = tmp_path / "in.mkv"
     source.write_bytes(b"a" * 100)
     target = tmp_path / "library" / "out.mkv"
-    monkeypatch.setattr(mover.shutil, "copyfileobj", _boom)
+    # Bricht mitten im Kopieren ab, kurz bevor die Daten auf der Platte landen.
+    monkeypatch.setattr(mover.os, "fsync", _boom)
     with pytest.raises(OSError):
         mover.move(source, target)
     assert source.exists()
     assert not target.exists()
+    assert not list(target.parent.glob("*.es-part"))
+    assert mover.active_transfers() == []
+
+
+def test_a_copy_reports_its_progress(tmp_path, monkeypatch):
+    monkeypatch.setattr(mover.files, "same_filesystem", lambda a, b: False)
+    monkeypatch.setattr(mover, "CHUNK", 16)
+
+    gesehen = []
+    echtes_fsync = mover.os.fsync
+
+    def _mitlesen(*args, **kwargs):
+        gesehen.append(mover.active_transfers())
+        return echtes_fsync(*args, **kwargs)
+
+    monkeypatch.setattr(mover.os, "fsync", _mitlesen)
+    source = tmp_path / "in.mkv"
+    source.write_bytes(b"a" * 100)
+    target = tmp_path / "library" / "out.mkv"
+    mover.move(source, target)
+
+    assert gesehen and gesehen[0], "während des Kopierens muss ein Eintrag sichtbar sein"
+    eintrag = gesehen[0][0]
+    assert eintrag["name"] == "out.mkv"
+    assert eintrag["total"] == 100
+    assert eintrag["copied"] == 100
+    assert eintrag["phase"] == "kopieren"
+    # Nach dem Ende bleibt nichts stehen.
+    assert mover.active_transfers() == []
 
 
 def test_episode_and_movie_naming():

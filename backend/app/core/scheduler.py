@@ -35,6 +35,14 @@ class Scheduler:
     def trigger(self) -> None:
         self._wake.set()
 
+    @property
+    def pass_lock(self) -> threading.Lock:
+        """Wer außerhalb des Loops Dateien anfasst, nimmt diese Sperre.
+
+        Sonst könnte ein Durchlauf dieselbe Datei ein zweites Mal verschieben.
+        """
+        return self._run_lock
+
     def run_once(self) -> dict[str, Any]:
         """Run one full pass. Safe to call from the API while the loop is idle."""
         with self._run_lock:

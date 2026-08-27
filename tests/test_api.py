@@ -100,6 +100,21 @@ def test_stream_generator_sends_a_change(client):
     assert "version" in zweites
 
 
+def _warte_auf_stapel(client, batch_id, timeout=10.0):
+    """Der Stapel läuft in einem eigenen Thread, also kurz nachfragen bis er fertig ist."""
+    import time
+
+    ende = time.time() + timeout
+    while time.time() < ende:
+        antwort = client.get(f"/api/batches/{batch_id}")
+        assert antwort.status_code == 200
+        state = antwort.json()
+        if state["finished_at"]:
+            return state
+        time.sleep(0.05)
+    raise AssertionError(f"Stapel {batch_id} wurde nicht fertig: {state}")
+
+
 def test_bulk_decision_handles_a_whole_season(client):
     """Eine ganze Staffel wird mit einem Knopf entschieden."""
     from app.db import session_scope
@@ -115,10 +130,71 @@ def test_bulk_decision_handles_a_whole_season(client):
             ids.append(job.id)
 
     antwort = client.post("/api/jobs/bulk", json={"action": "duplicate_discard", "ids": ids})
-    assert antwort.status_code == 200
-    daten = antwort.json()
-    assert daten["erledigt"] == 4 and daten["fehler"] == 0
+    assert antwort.status_code == 202
+    stapel = antwort.json()
+    assert stapel["total"] == 4
+    assert stapel["label"] == "verworfen"
+
+    fertig = _warte_auf_stapel(client, stapel["id"])
+    assert fertig["done"] == 4, fertig["errors"]
+    assert fertig["failed"] == 0
 
     with session_scope() as session:
         for job_id in ids:
             assert session.get(Job, job_id).status == "skipped"
+
+
+def test_bulk_reports_progress_and_survives_a_missing_job(client):
+    """Der Fortschritt ist abrufbar und eine gelöschte Datei kippt den Stapel nicht."""
+    from app.db import session_scope
+    from app.models import Job
+
+    ids = []
+    with session_scope() as session:
+        for nummer in range(1, 3):
+            job = Job(source_path=f"/tmp/fort-{nummer}.mkv", filename=f"fort-{nummer}.mkv",
+                      status="duplicate", duplicate_of="/tmp/alt.mkv")
+            session.add(job)
+            session.flush()
+            ids.append(job.id)
+
+    antwort = client.post("/api/jobs/bulk", json={"action": "duplicate_discard", "ids": ids + [999999]})
+    stapel = antwort.json()
+    assert stapel["total"] == 2, "unbekannte Nummern fallen vorher raus"
+
+    fertig = _warte_auf_stapel(client, stapel["id"])
+    assert fertig["done"] == 2 and fertig["failed"] == 0
+    assert fertig["current"] is None
+
+    # Der Status trägt den Vorgang mit, damit die Oberfläche ihn nach dem
+    # Neuladen weiter anzeigen kann.
+    status = client.get("/api/status").json()
+    assert status["batch"]["id"] == stapel["id"]
+    assert status["transfers"] == []
+
+
+def test_cancel_endpoint_answers(client):
+    """Den Knopf im Dashboard gibt es, also muss der Weg dahinter stimmen."""
+    from app.db import session_scope
+    from app.models import Job
+
+    with session_scope() as session:
+        job = Job(source_path="/tmp/abbruch-api.mkv", filename="abbruch-api.mkv",
+                  status="duplicate", duplicate_of="/tmp/alt.mkv")
+        session.add(job)
+        session.flush()
+        job_id = job.id
+
+    stapel = client.post("/api/jobs/bulk", json={"action": "duplicate_discard", "ids": [job_id]}).json()
+    antwort = client.post(f"/api/batches/{stapel['id']}/cancel")
+    assert antwort.status_code == 200
+    assert antwort.json()["id"] == stapel["id"]
+    _warte_auf_stapel(client, stapel["id"])
+
+    assert client.post("/api/batches/gibtesnicht/cancel").status_code == 404
+
+
+def test_bulk_rejects_an_empty_list(client):
+    assert client.post("/api/jobs/bulk", json={"action": "duplicate_discard", "ids": []}).status_code == 400
+    assert client.post("/api/jobs/bulk", json={"action": "duplicate_discard", "ids": [424242]}).status_code == 404
+    assert client.get("/api/batches/gibtesnicht").status_code == 404
