@@ -30,6 +30,7 @@ router = APIRouter(prefix="/api")
 class DecisionIn(BaseModel):
     action: str
     payload: dict[str, Any] = Field(default_factory=dict)
+    ids: list[int] = Field(default_factory=list)
 
 
 class SettingsIn(BaseModel):
@@ -250,8 +251,9 @@ def reanalyze(job_id: int, session: Session = Depends(get_session)) -> dict[str,
 
 @router.post("/jobs/bulk")
 def bulk(body: DecisionIn, ids: list[int] = Query(default=[]), session: Session = Depends(get_session)):
+    """Dieselbe Entscheidung für mehrere Jobs, etwa eine ganze Staffel auf einmal."""
     results = []
-    for job_id in ids:
+    for job_id in body.ids or ids:
         job = session.get(Job, job_id)
         if job is None:
             continue
@@ -261,7 +263,8 @@ def bulk(body: DecisionIn, ids: list[int] = Query(default=[]), session: Session 
         except ValueError as exc:
             results.append({"id": job_id, "error": str(exc)})
     session.flush()
-    return {"results": results}
+    erledigt = [r for r in results if not r.get("error")]
+    return {"results": results, "erledigt": len(erledigt), "fehler": len(results) - len(erledigt)}
 
 
 @router.delete("/jobs/{job_id}")

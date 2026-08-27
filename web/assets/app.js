@@ -410,16 +410,114 @@ async function renderDecisions(root) {
   bindJobRows(root);
 }
 
+function dublettenGruppen(jobs) {
+  const gruppen = new Map();
+  for (const job of jobs) {
+    const titel = job.title || job.parsed_title || job.filename;
+    const staffel = job.season === null || job.season === undefined ? null : job.season;
+    const schluessel = `${titel}|${staffel}`;
+    if (!gruppen.has(schluessel)) {
+      gruppen.set(schluessel, { titel, staffel, jobs: [] });
+    }
+    gruppen.get(schluessel).jobs.push(job);
+  }
+  for (const gruppe of gruppen.values()) {
+    gruppe.jobs.sort((a, b) => (a.episode || 0) - (b.episode || 0));
+  }
+  return [...gruppen.values()].sort((a, b) => b.jobs.length - a.jobs.length || a.titel.localeCompare(b.titel, "de"));
+}
+
+function folgenName(job) {
+  if (job.season !== null && job.season !== undefined && job.episode) {
+    return `S${String(job.season).padStart(2, "0")}E${String(job.episode).padStart(2, "0")}`;
+  }
+  if (job.absolute_episode) return `Folge ${job.absolute_episode}`;
+  return job.filename.slice(0, 28);
+}
+
+function kurzInfo(info) {
+  if (!info) return "unbekannt";
+  const teile = [];
+  if (info.size) teile.push(bytes(info.size));
+  if (info.resolution) teile.push(info.resolution);
+  if (info.video_codec) teile.push(info.video_codec);
+  if ((info.audio || []).length) teile.push(`${info.audio.length} Ton`);
+  return teile.join(" / ") || "unbekannt";
+}
+
+function groessenVergleich(neu, alt) {
+  if (!alt || !neu) return "";
+  const faktor = neu / alt;
+  const runden = (wert) => (wert >= 10 ? Math.round(wert) : wert.toFixed(1));
+  if (faktor >= 2) return `neu ist ${runden(faktor)} mal so groß`;
+  if (faktor <= 0.5) return `neu ist ${runden(1 / faktor)} mal kleiner`;
+  const prozent = Math.round((faktor - 1) * 100);
+  if (Math.abs(prozent) <= 2) return "gleich groß";
+  return prozent > 0 ? `neu ist ${prozent} Prozent größer` : `neu ist ${Math.abs(prozent)} Prozent kleiner`;
+}
+
+function dublettenZeile(job) {
+  const info = job.duplicate_info || {};
+  const neu = (info.incoming || {}).size || job.size_bytes || 0;
+  const alt = (info.existing || {}).size || 0;
+  const tendenz = groessenVergleich(neu, alt);
+  return `
+    <div class="list-item" data-job="${job.id}">
+      <span>
+        <strong>${esc(folgenName(job))}</strong>
+        <span class="row-sub" style="margin-left: 10px;">neu ${esc(kurzInfo(info.incoming))}</span>
+        <div class="row-sub">alt ${esc(kurzInfo(info.existing))}${tendenz ? ` / ${esc(tendenz)}` : ""}</div>
+      </span>
+      <span class="row-actions">
+        <button class="btn btn-small" data-action="decision" data-decision="duplicate_discard" data-job="${job.id}">verwerfen</button>
+        <button class="btn btn-small" data-action="decision" data-decision="duplicate_keep_both" data-job="${job.id}">behalten</button>
+        <button class="btn btn-small btn-danger" data-action="decision" data-decision="duplicate_replace" data-job="${job.id}">ersetzen</button>
+      </span>
+    </div>`;
+}
+
+function dublettenGruppe(gruppe) {
+  const ids = gruppe.jobs.map((job) => job.id).join(",");
+  const anzahl = gruppe.jobs.length;
+  const summe = gruppe.jobs.reduce((wert, job) => wert + (job.size_bytes || 0), 0);
+  const staffel = gruppe.staffel === null ? "" : ` / Staffel ${String(gruppe.staffel).padStart(2, "0")}`;
+  const ziel = gruppe.jobs[0].target_dir || "";
+  return `
+    <section class="block" data-gruppe="${esc(gruppe.titel)}">
+      <div class="block-head">
+        <div>
+          <h2>${esc(gruppe.titel)}${esc(staffel)}</h2>
+          <p>${plural(anzahl, "Dublette", "Dubletten")}, ${esc(bytes(summe))} neu geladen<br>
+             <span class="path">${esc(ziel)}</span></p>
+        </div>
+        ${anzahl > 1 ? `<div class="row-actions">
+          <button class="btn btn-small" data-action="dup-gruppe" data-decision="duplicate_discard" data-ids="${ids}">Alle verwerfen</button>
+          <button class="btn btn-small" data-action="dup-gruppe" data-decision="duplicate_keep_both" data-ids="${ids}">Alle behalten</button>
+          <button class="btn btn-small btn-danger" data-action="dup-gruppe" data-decision="duplicate_replace" data-ids="${ids}"
+                  data-frage="Alle ${anzahl} ersetzen?">Alle ersetzen</button>
+        </div>` : ""}
+      </div>
+      <div class="list">${gruppe.jobs.map(dublettenZeile).join("")}</div>
+    </section>`;
+}
+
 async function renderDuplicates(root) {
-  const { jobs } = await api("/api/jobs?status=duplicate&limit=200");
+  const { jobs } = await api("/api/jobs?status=duplicate&limit=400");
   if (!jobs.length) {
     root.innerHTML = emptyState("Keine Dubletten", "Es liegt keine Datei vor, die es in der Bibliothek schon gibt.");
     return;
   }
-  root.innerHTML = `<section class="block">
-    <div class="block-head"><div><h2>${plural(jobs.length, "Dublette", "Dubletten")}</h2><p>Nichts wird automatisch überschrieben.</p></div></div>
-    ${jobs.map(duplicateCard).join("")}
-  </section>`;
+  const gruppen = dublettenGruppen(jobs);
+  root.innerHTML = `
+    <section class="block">
+      <div class="block-head">
+        <div>
+          <h2>${plural(jobs.length, "Dublette", "Dubletten")} in ${plural(gruppen.length, "Titel", "Titeln")}</h2>
+          <p>Nichts wird automatisch überschrieben. Ganze Staffeln lassen sich in einem Zug entscheiden.</p>
+        </div>
+      </div>
+    </section>
+    ${gruppen.map(dublettenGruppe).join("")}`;
   bindJobRows(root);
 }
 
@@ -436,28 +534,6 @@ function mediaFacts(info) {
     ["Bitrate", info.bitrate_kbps ? `${info.bitrate_kbps} kbit/s` : "unbekannt"],
   ];
   return `<dl class="kv">${rows.map(([key, value]) => `<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join("")}</dl>`;
-}
-
-function duplicateCard(job) {
-  const info = job.duplicate_info || {};
-  return `<article class="block" data-job="${job.id}">
-    <div class="block-head">
-      <div>
-        <h2>${esc(job.title || job.parsed_title || job.filename)}</h2>
-        <p class="path">${esc(job.duplicate_of || "")}</p>
-      </div>
-    </div>
-    <div class="compare">
-      <div class="compare-col" data-role="existing"><h3>In der Bibliothek</h3>${mediaFacts(info.existing)}</div>
-      <div class="compare-col" data-role="incoming"><h3>Neu aus dem Download</h3>${mediaFacts(info.incoming)}</div>
-    </div>
-    <div class="row-actions" style="justify-content: flex-start;">
-      <button class="btn" data-action="decision" data-decision="duplicate_discard" data-job="${job.id}">Neue Datei verwerfen</button>
-      <button class="btn" data-action="decision" data-decision="duplicate_keep_both" data-job="${job.id}">Zusätzlich behalten</button>
-      <button class="btn btn-danger" data-action="decision" data-decision="duplicate_replace" data-job="${job.id}">Vorhandene ersetzen</button>
-      <button class="btn" data-action="decision" data-decision="defer" data-job="${job.id}">Später entscheiden</button>
-    </div>
-  </article>`;
 }
 
 async function renderJDownloader(root) {
@@ -875,6 +951,32 @@ async function onClick(event) {
 
   if (action === "decision") {
     await sendDecision(trigger.dataset.job, trigger.dataset.decision, {}, trigger);
+    return;
+  }
+
+  if (action === "dup-gruppe") {
+    const ids = (trigger.dataset.ids || "").split(",").filter(Boolean).map(Number);
+    const frage = trigger.dataset.frage;
+    if (frage && trigger.dataset.scharf !== "ja") {
+      // Ersetzen ist nicht umkehrbar, deshalb ein zweiter bewusster Klick.
+      const beschriftung = trigger.textContent;
+      trigger.dataset.scharf = "ja";
+      trigger.textContent = frage;
+      setTimeout(() => {
+        if (trigger.isConnected) { trigger.dataset.scharf = ""; trigger.textContent = beschriftung; }
+      }, 6000);
+      return;
+    }
+    await run(trigger, async () => {
+      const ergebnis = await api("/api/jobs/bulk", {
+        method: "POST",
+        body: { action: trigger.dataset.decision, ids, payload: {} },
+      });
+      toast(`${ergebnis.erledigt} von ${ids.length} erledigt${ergebnis.fehler ? `, ${ergebnis.fehler} Fehler` : ""}`,
+            ergebnis.fehler ? "bad" : "good");
+      await refreshStatus();
+      await render();
+    });
     return;
   }
 

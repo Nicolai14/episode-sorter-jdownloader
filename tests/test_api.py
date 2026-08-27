@@ -98,3 +98,27 @@ def test_stream_generator_sends_a_change(client):
     assert erstes.startswith("retry:")
     assert zweites.startswith("event: change")
     assert "version" in zweites
+
+
+def test_bulk_decision_handles_a_whole_season(client):
+    """Eine ganze Staffel wird mit einem Knopf entschieden."""
+    from app.db import session_scope
+    from app.models import Job
+
+    ids = []
+    with session_scope() as session:
+        for nummer in range(1, 5):
+            job = Job(source_path=f"/tmp/bulk-{nummer}.mkv", filename=f"bulk-{nummer}.mkv",
+                      status="duplicate", duplicate_of="/tmp/alt.mkv")
+            session.add(job)
+            session.flush()
+            ids.append(job.id)
+
+    antwort = client.post("/api/jobs/bulk", json={"action": "duplicate_discard", "ids": ids})
+    assert antwort.status_code == 200
+    daten = antwort.json()
+    assert daten["erledigt"] == 4 and daten["fehler"] == 0
+
+    with session_scope() as session:
+        for job_id in ids:
+            assert session.get(Job, job_id).status == "skipped"
