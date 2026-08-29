@@ -383,25 +383,260 @@ function setCount(key, value, alert = false) {
   if (alert && value > 0) node.dataset.tone = "alert"; else delete node.dataset.tone;
 }
 
+/* ------------------------------------------------------------------ icons */
+
+const svgIcon = (paths) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+
+const ICONS = {
+  clock: svgIcon('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.6 2.6"/>'),
+  alert: svgIcon('<circle cx="12" cy="12" r="8"/><path d="M12 8v4.5"/><path d="M12 15.5h.01"/>'),
+  copy: svgIcon('<rect x="8" y="8" width="12" height="12" rx="2.4"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
+  check: svgIcon('<circle cx="12" cy="12" r="8"/><path d="M8.6 12.3l2.3 2.3 4.5-5"/>'),
+  cross: svgIcon('<circle cx="12" cy="12" r="8"/><path d="M9.5 9.5l5 5M14.5 9.5l-5 5"/>'),
+  star: svgIcon('<path d="M12 4.5l2.1 4.6 5 .5-3.8 3.4 1.1 4.9-4.4-2.6-4.4 2.6 1.1-4.9-3.8-3.4 5-.5z"/>'),
+  tv: svgIcon('<rect x="4" y="7" width="16" height="12" rx="2"/><path d="M9 3.5l3 3 3-3"/>'),
+  film: svgIcon('<rect x="4" y="4" width="16" height="16" rx="2.4"/><path d="M8 4v16M16 4v16M4 9h4M4 15h4M16 9h4M16 15h4"/>'),
+  file: svgIcon('<path d="M7 3.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5A1.5 1.5 0 0 1 7 3.5z"/><path d="M14 3.5V8h4.5"/>'),
+  dot: svgIcon('<circle cx="12" cy="12" r="3.4"/>'),
+};
+
+/* ------------------------------------------------------------------ charts */
+
+// Shared tooltip for all SVG charts, follows the pointer.
+document.addEventListener("mousemove", (event) => {
+  const tip = qs("#chartTip");
+  if (!tip) return;
+  const target = event.target.closest("[data-tip]");
+  if (!target) { tip.hidden = true; return; }
+  tip.textContent = target.dataset.tip;
+  tip.hidden = false;
+  tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 10)}px`;
+  tip.style.top = `${event.clientY + 16}px`;
+});
+
+function pad2(value) { return String(value).padStart(2, "0"); }
+
+function lastDays(count) {
+  const days = [];
+  const now = new Date();
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    days.push({
+      key: `${day.getFullYear()}-${pad2(day.getMonth() + 1)}-${pad2(day.getDate())}`,
+      label: `${day.getDate()}.${day.getMonth() + 1}.`,
+    });
+  }
+  return days;
+}
+
+function bucketByDay(jobs, days) {
+  const buckets = new Map(days.map((day) => [day.key, { count: 0, bytes: 0 }]));
+  for (const job of jobs) {
+    const iso = job.finished_at || job.updated_at;
+    if (!iso) continue;
+    const when = new Date(iso);
+    const key = `${when.getFullYear()}-${pad2(when.getMonth() + 1)}-${pad2(when.getDate())}`;
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    bucket.count += 1;
+    bucket.bytes += job.size_bytes || 0;
+  }
+  return days.map((day) => buckets.get(day.key));
+}
+
+function niceMax(value) {
+  if (value <= 4) return 4;
+  const power = 10 ** Math.floor(Math.log10(value));
+  const unit = value / power;
+  return (unit <= 2 ? 2 : unit <= 5 ? 5 : 10) * power;
+}
+
+// Catmull-Rom spline through the points, so the line bends like the reference.
+function smoothPath(points) {
+  if (points.length < 3) return `M${points.map((p) => p.join(",")).join(" L")}`;
+  let path = `M${points[0][0]},${points[0][1]}`;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+    const c1x = (p1[0] + (p2[0] - p0[0]) / 6).toFixed(1);
+    const c1y = (p1[1] + (p2[1] - p0[1]) / 6).toFixed(1);
+    const c2x = (p2[0] - (p3[0] - p1[0]) / 6).toFixed(1);
+    const c2y = (p2[1] - (p3[1] - p1[1]) / 6).toFixed(1);
+    path += `C${c1x},${c1y} ${c2x},${c2y} ${p2[0]},${p2[1]}`;
+  }
+  return path;
+}
+
+function areaChart(days, values, unit) {
+  const width = 640;
+  const height = 230;
+  const padL = 34; const padR = 14; const padT = 14; const padB = 26;
+  const plotH = height - padT - padB;
+  const max = niceMax(Math.max(...values));
+  const stepX = (width - padL - padR) / Math.max(1, days.length - 1);
+  const x = (i) => +(padL + i * stepX).toFixed(1);
+  const y = (v) => +(padT + plotH * (1 - v / max)).toFixed(1);
+  const points = values.map((v, i) => [x(i), y(v)]);
+
+  const gridLines = [0, 0.5, 1].map((share) => {
+    const gy = y(max * share);
+    return `<line class="grid-line" x1="${padL}" x2="${width - padR}" y1="${gy}" y2="${gy}"/>`
+      + `<text class="axis-label" x="${padL - 8}" y="${gy + 3}" text-anchor="end">${Math.round(max * share)}</text>`;
+  }).join("");
+
+  const xLabels = days.map((day, i) => {
+    if (i % 3 !== 0 && i !== days.length - 1) return "";
+    return `<text class="axis-label" x="${x(i)}" y="${height - 8}" text-anchor="middle">${esc(day.label)}</text>`;
+  }).join("");
+
+  const line = smoothPath(points);
+  const area = `${line}L${x(days.length - 1)},${y(0)}L${x(0)},${y(0)}Z`;
+
+  const hits = days.map((day, i) => `
+    <g>
+      <rect class="hit" x="${(x(i) - stepX / 2).toFixed(1)}" y="${padT}" width="${stepX.toFixed(1)}" height="${plotH}"
+            data-tip="${esc(day.label)} ${values[i]} ${esc(unit)}"/>
+      <circle class="dot" cx="${x(i)}" cy="${y(values[i])}" r="4"/>
+    </g>`).join("");
+
+  return `<svg viewBox="0 0 ${width} ${height}" role="img">
+    <defs>
+      <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#21d4fd" stop-opacity="0.4"/>
+        <stop offset="1" stop-color="#2152ff" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    ${gridLines}${xLabels}
+    <path class="area-fill" d="${area}"/>
+    <path class="area-line" d="${line}"/>
+    ${hits}
+  </svg>`;
+}
+
+function barChart(days, values, unit) {
+  const width = 320;
+  const height = 190;
+  const padT = 12; const padB = 22; const padX = 10;
+  const plotH = height - padT - padB;
+  const max = Math.max(1, ...values);
+  const stepX = (width - padX * 2) / days.length;
+  const barW = 6;
+
+  const bars = days.map((day, i) => {
+    const value = values[i];
+    const barH = plotH * (value / max);
+    const bx = (padX + i * stepX + stepX / 2 - barW / 2).toFixed(1);
+    const by = (padT + plotH - barH).toFixed(1);
+    return `<g>
+      <rect class="bar-hit" x="${(padX + i * stepX).toFixed(1)}" y="${padT}" width="${stepX.toFixed(1)}" height="${plotH}"
+            data-tip="${esc(day.label)} ${value.toFixed(1)} ${esc(unit)}"/>
+      ${value > 0 ? `<rect class="bar" x="${bx}" y="${by}" width="${barW}" height="${barH.toFixed(1)}" rx="3"/>` : ""}
+    </g>`;
+  }).join("");
+
+  const labels = days.map((day, i) => {
+    if (i !== 0 && i !== days.length - 1 && i !== Math.floor(days.length / 2)) return "";
+    return `<text class="axis-label" x="${(padX + i * stepX + stepX / 2).toFixed(1)}" y="${height - 6}" text-anchor="middle">${esc(day.label)}</text>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${width} ${height}" role="img">${bars}${labels}</svg>`;
+}
+
+function gaugeArc(cx, cy, r, startDeg, endDeg) {
+  const rad = (deg) => ((deg - 90) * Math.PI) / 180;
+  const sx = (cx + r * Math.cos(rad(startDeg))).toFixed(1);
+  const sy = (cy + r * Math.sin(rad(startDeg))).toFixed(1);
+  const ex = (cx + r * Math.cos(rad(endDeg))).toFixed(1);
+  const ey = (cy + r * Math.sin(rad(endDeg))).toFixed(1);
+  const large = endDeg - startDeg > 180 ? 1 : 0;
+  return `M${sx},${sy}A${r},${r} 0 ${large} 1 ${ex},${ey}`;
+}
+
+function gaugeSvg(share) {
+  const sweep = 270;
+  const start = -135;
+  const end = start + sweep * Math.min(1, Math.max(0, share));
+  return `<svg viewBox="0 0 160 160" role="img">
+    <defs>
+      <linearGradient id="gaugeGrad" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#2152ff"/>
+        <stop offset="1" stop-color="#21d4fd"/>
+      </linearGradient>
+    </defs>
+    <path class="gauge-track" d="${gaugeArc(80, 80, 66, start, start + sweep)}"/>
+    ${share > 0 ? `<path class="gauge-fill" d="${gaugeArc(80, 80, 66, start, Math.max(end, start + 4))}"/>` : ""}
+  </svg>`;
+}
+
 /* ------------------------------------------------------------------ views */
+
+function kpiTile(tile) {
+  const delta = tile.delta
+    ? `<span class="kpi-delta" data-tone="${tile.tone || "good"}">${esc(tile.delta)}</span>` : "";
+  return `<div class="kpi">
+    <div>
+      <div class="kpi-label">${esc(tile.label)}</div>
+      <div class="kpi-value">${tile.value}${delta}</div>
+    </div>
+    <span class="kpi-icon">${tile.icon}</span>
+  </div>`;
+}
+
+function ministat(icon, label, value, share) {
+  return `<div class="ministat">
+    <span class="ministat-head"><span class="nav-icon">${icon}</span>${esc(label)}</span>
+    <span class="ministat-value">${value}</span>
+    <span class="ministat-bar"><i style="width:${Math.round(Math.min(1, share) * 100)}%"></i></span>
+  </div>`;
+}
+
+function timelineItem(event) {
+  const icon = event.level === "error" ? ICONS.cross : event.level === "warn" ? ICONS.alert : ICONS.dot;
+  return `<div class="tl-item" data-level="${esc(event.level)}">
+    <span class="tl-dot">${icon}</span>
+    <div>
+      <div class="tl-text">${esc(event.message)}</div>
+      <div class="tl-meta">${esc(event.source)} · ${new Date(event.ts).toLocaleString("de-DE")}</div>
+    </div>
+  </div>`;
+}
 
 async function renderOverview(root) {
   const status = state.status || {};
   const counts = status.counts || {};
-  const [jobsPayload, eventsPayload] = await Promise.all([
-    api("/api/jobs?limit=40"),
-    api("/api/events?limit=12"),
+  const [jobsPayload, donePayload, eventsPayload, libraryPayload] = await Promise.all([
+    api("/api/jobs?limit=12"),
+    api("/api/jobs?status=done&limit=1000"),
+    api("/api/events?limit=8"),
+    api("/api/library?limit=2000"),
   ]);
   const jobs = jobsPayload.jobs;
+  const doneJobs = donePayload.jobs;
+  const libraryItems = libraryPayload.items || [];
 
-  const stats = [
-    { label: "wartet auf Entpacken", value: (counts.waiting || 0) + (counts.analyzing || 0) },
-    { label: "Entscheidung nötig", value: counts.review || 0, tone: (counts.review || 0) > 0 ? "alert" : null },
-    { label: "Dubletten", value: counts.duplicate || 0, tone: (counts.duplicate || 0) > 0 ? "alert" : null },
-    { label: "geplant", value: counts.planned || 0 },
-    { label: "einsortiert", value: counts.done || 0, tone: "good" },
-    { label: "Fehler", value: counts.failed || 0, tone: (counts.failed || 0) > 0 ? "bad" : null },
+  const days = lastDays(14);
+  const buckets = bucketByDay(doneJobs, days);
+  const dayCounts = buckets.map((bucket) => bucket.count);
+  const dayGigabytes = buckets.map((bucket) => bucket.bytes / 2 ** 30);
+  const doneToday = dayCounts[dayCounts.length - 1];
+  const doneWeek = dayCounts.slice(-7).reduce((a, b) => a + b, 0);
+  const totalVolume = buckets.reduce((sum, bucket) => sum + bucket.bytes, 0);
+
+  const open = (counts.waiting || 0) + (counts.analyzing || 0) + (counts.ready || 0)
+    + (counts.planned || 0) + (counts.moving || 0);
+  const kpis = [
+    { label: "Offen", value: open, icon: ICONS.clock },
+    { label: "Entscheidung nötig", value: counts.review || 0, icon: ICONS.alert,
+      delta: (counts.review || 0) > 0 ? "wartet" : "", tone: "warn" },
+    { label: "Dubletten", value: counts.duplicate || 0, icon: ICONS.copy,
+      delta: (counts.duplicate || 0) > 0 ? "wartet" : "", tone: "warn" },
+    { label: "Einsortiert", value: counts.done || 0, icon: ICONS.check,
+      delta: doneToday > 0 ? `+${doneToday} heute` : "", tone: "good" },
   ];
+  if (counts.failed) kpis.push({ label: "Fehler", value: counts.failed, icon: ICONS.cross, delta: "prüfen", tone: "bad" });
 
   const warnings = [];
   if (!status.download_dir_ok) warnings.push(`Der Downloadordner <strong>${esc(status.download_dir)}</strong> ist nicht erreichbar.`);
@@ -412,28 +647,72 @@ async function renderOverview(root) {
   if (!status.tmdb_configured) warnings.push("Kein TMDb-Schlüssel hinterlegt. Filme und Serien werden nur über AniList oder gar nicht geprüft.");
   if (status.dry_run) warnings.push("Dry Run ist aktiv. Es wird nichts verschoben, nur geplant.");
 
+  // Success share across everything that reached a final state.
+  const finished = (counts.done || 0) + (counts.failed || 0) + (counts.skipped || 0);
+  const successShare = finished ? (counts.done || 0) / finished : 0;
+
+  const mediaCounts = { anime: 0, series: 0, movie: 0 };
+  let fileTotal = 0;
+  for (const item of libraryItems) {
+    if (mediaCounts[item.media_type] !== undefined) mediaCounts[item.media_type] += 1;
+    fileTotal += item.file_count || 0;
+  }
+  const maxMedia = Math.max(1, mediaCounts.anime, mediaCounts.series, mediaCounts.movie);
+
   root.innerHTML = `
-    <section class="block">
-      <div class="statbar">
-        ${stats.map((stat) => `
-          <div class="stat"${stat.tone ? ` data-tone="${stat.tone}"` : ""}>
-            <div class="stat-value">${stat.value}</div>
-            <div class="stat-label">${esc(stat.label)}</div>
-          </div>`).join("")}
+    <section class="kpis">${kpis.map(kpiTile).join("")}</section>
+
+    ${warnings.length ? `<section class="block">${warnings.map((text) => `<div class="notice" data-tone="warn">${text}</div>`).join("")}</section>` : ""}
+
+    <section class="grid-charts">
+      <div class="chart-card">
+        <div class="card-title">Einsortiert pro Tag</div>
+        <div class="card-sub"><strong>${doneWeek}</strong> ${doneWeek === 1 ? "Datei" : "Dateien"} in den letzten 7 Tagen</div>
+        <div class="chart">${areaChart(days, dayCounts, "einsortiert")}</div>
       </div>
-      ${warnings.map((text) => `<div class="notice" data-tone="warn">${text}</div>`).join("")}
+      <div class="chart-card">
+        <div class="card-title">Datenvolumen pro Tag</div>
+        <div class="card-sub"><strong>${bytes(totalVolume)}</strong> in 14 Tagen verschoben</div>
+        <div class="bars-panel">${barChart(days, dayGigabytes, "GB")}</div>
+        <div class="ministats">
+          ${ministat(ICONS.star, "Anime", mediaCounts.anime, mediaCounts.anime / maxMedia)}
+          ${ministat(ICONS.tv, "Serien", mediaCounts.series, mediaCounts.series / maxMedia)}
+          ${ministat(ICONS.film, "Filme", mediaCounts.movie, mediaCounts.movie / maxMedia)}
+          ${ministat(ICONS.file, "Dateien", fileTotal, 1)}
+        </div>
+      </div>
     </section>
 
-    <section class="block">
-      <div class="block-head">
-        <div><h2>Letzte Dateien</h2><p>${plural(jobs.length, "Eintrag", "Einträge")}, neueste zuerst</p></div>
+    <section class="grid-bottom">
+      <div class="block">
+        <div class="block-head">
+          <div><h2>Letzte Dateien</h2><p>${plural(jobs.length, "Eintrag", "Einträge")}, neueste zuerst</p></div>
+        </div>
+        ${jobs.length ? `<div class="rows">${jobs.map(jobRow).join("")}</div>` : emptyState("Noch nichts gesehen", "Sobald JDownloader eine Datei fertig entpackt hat, taucht sie hier auf.")}
       </div>
-      ${jobs.length ? `<div class="rows">${jobs.map(jobRow).join("")}</div>` : emptyState("Noch nichts gesehen", "Sobald JDownloader eine Datei fertig entpackt hat, taucht sie hier auf.")}
-    </section>
-
-    <section class="block">
-      <div class="block-head"><div><h2>Protokoll</h2><p>letzte Ereignisse</p></div></div>
-      <div class="list">${eventsPayload.events.map(logLine).join("") || emptyState("Leer", "Noch keine Ereignisse.")}</div>
+      <div class="block" style="gap: 18px;">
+        <div class="gauge-card">
+          <div class="card-title">Erfolgsquote</div>
+          <div class="card-sub">Anteil einsortierter Dateien</div>
+          <div class="gauge-wrap">
+            ${gaugeSvg(successShare)}
+            <div class="gauge-center">
+              <div class="gauge-value">${finished ? Math.round(successShare * 100) : 0}%</div>
+              <div class="gauge-hint">${plural(finished, "Datei gesamt", "Dateien gesamt")}</div>
+            </div>
+          </div>
+          <div class="gauge-foot">
+            <span><strong>${counts.done || 0}</strong> einsortiert</span>
+            <span><strong>${counts.skipped || 0}</strong> verworfen</span>
+            <span><strong>${counts.failed || 0}</strong> Fehler</span>
+          </div>
+        </div>
+        <div class="side-card">
+          <div class="card-title">Protokoll</div>
+          <div class="card-sub">letzte Ereignisse</div>
+          <div class="timeline">${eventsPayload.events.map(timelineItem).join("") || `<div class="card-sub">Noch keine Ereignisse.</div>`}</div>
+        </div>
+      </div>
     </section>
   `;
   bindJobRows(root);
