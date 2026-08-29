@@ -7,6 +7,7 @@ const state = {
   paused: false,
   librarySort: localStorage.getItem("es-library-sort") || "recent",
   libraryOpen: JSON.parse(localStorage.getItem("es-library-open") || "{}"),
+  overviewOpen: {},
   libraryShowAll: {},
   scanShare: 0,
   settings: null,
@@ -604,11 +605,72 @@ function timelineItem(event) {
   </div>`;
 }
 
+// Recent jobs collapse into one line per title. A season of downloads is one
+// story, not twelve rows.
+const GROUP_STATUS_ORDER = ["failed", "review", "duplicate", "moving", "analyzing", "waiting", "ready", "planned", "done", "skipped"];
+
+function groupRecentJobs(jobs) {
+  const groups = new Map();
+  for (const job of jobs) {
+    const title = job.title || job.parsed_title || job.filename;
+    const key = `${job.media_type}|${title}`;
+    if (!groups.has(key)) groups.set(key, { key, title, media_type: job.media_type, jobs: [] });
+    groups.get(key).jobs.push(job);
+  }
+  return [...groups.values()];
+}
+
+function groupChips(jobs) {
+  const counts = {};
+  for (const job of jobs) counts[job.status] = (counts[job.status] || 0) + 1;
+  return GROUP_STATUS_ORDER
+    .filter((status) => counts[status])
+    .map((status) => `<span class="chip" data-state="${status}">${counts[status]} ${esc(STATUS_LABEL[status] || status)}</span>`)
+    .join("");
+}
+
+function groupSub(group) {
+  const parts = [MEDIA_LABEL[group.media_type] || "unbekannt"];
+  const seasons = [...new Set(group.jobs.map((job) => job.season).filter((s) => s !== null && s !== undefined))]
+    .sort((a, b) => a - b);
+  if (seasons.length === 1) parts.push(`Staffel ${String(seasons[0]).padStart(2, "0")}`);
+  else if (seasons.length > 1) parts.push(`Staffel ${seasons[0]}-${seasons[seasons.length - 1]}`);
+  const size = group.jobs.reduce((sum, job) => sum + (job.size_bytes || 0), 0);
+  if (size) parts.push(bytes(size));
+  const newest = group.jobs.reduce((latest, job) => (job.updated_at > latest ? job.updated_at : latest), "");
+  if (newest) parts.push(relTime(newest));
+  return parts.join(" / ");
+}
+
+function overviewGroupRow(group) {
+  if (group.jobs.length === 1) return jobRow(group.jobs[0]);
+  const open = Boolean(state.overviewOpen[group.key]);
+  const episodes = [...group.jobs].sort((a, b) =>
+    (a.season ?? 0) - (b.season ?? 0)
+    || (a.episode ?? a.absolute_episode ?? 0) - (b.episode ?? b.absolute_episode ?? 0));
+  const unit = group.jobs.every((job) => job.episode || job.absolute_episode) ? "Folgen" : "Dateien";
+  return `
+    <article class="row row-group${open ? " is-open" : ""}">
+      <div class="group-toggle" data-action="group-toggle" data-key="${esc(group.key)}" role="button" tabindex="0"
+           aria-expanded="${open}" aria-label="${esc(group.title)}: ${group.jobs.length} ${unit} ${open ? "einklappen" : "ausklappen"}">
+        <div class="row-title">${esc(group.title)}</div>
+        <div class="row-sub">${esc(groupSub(group))}</div>
+      </div>
+      <div class="group-chips">${groupChips(group.jobs)}</div>
+      <div class="row-actions">
+        <button class="btn btn-small" data-action="group-toggle" data-key="${esc(group.key)}">
+          ${group.jobs.length} ${unit}<span class="group-caret" aria-hidden="true"></span>
+        </button>
+      </div>
+      ${open ? `<div class="row-children">${episodes.map(jobRow).join("")}</div>` : ""}
+    </article>`;
+}
+
 async function renderOverview(root) {
   const status = state.status || {};
   const counts = status.counts || {};
   const [jobsPayload, donePayload, eventsPayload, libraryPayload] = await Promise.all([
-    api("/api/jobs?limit=12"),
+    api("/api/jobs?limit=60"),
     api("/api/jobs?status=done&limit=1000"),
     api("/api/events?limit=8"),
     api("/api/library?limit=2000"),
@@ -651,6 +713,8 @@ async function renderOverview(root) {
   const finished = (counts.done || 0) + (counts.failed || 0) + (counts.skipped || 0);
   const successShare = finished ? (counts.done || 0) / finished : 0;
 
+  const groups = groupRecentJobs(jobs).slice(0, 10);
+
   const mediaCounts = { anime: 0, series: 0, movie: 0 };
   let fileTotal = 0;
   for (const item of libraryItems) {
@@ -686,9 +750,9 @@ async function renderOverview(root) {
     <section class="grid-bottom">
       <div class="block">
         <div class="block-head">
-          <div><h2>Letzte Dateien</h2><p>${plural(jobs.length, "Eintrag", "Einträge")}, neueste zuerst</p></div>
+          <div><h2>Letzte Dateien</h2><p>${plural(jobs.length, "Eintrag", "Einträge")} in ${plural(groups.length, "Titel", "Titeln")}, neueste zuerst</p></div>
         </div>
-        ${jobs.length ? `<div class="rows">${jobs.map(jobRow).join("")}</div>` : emptyState("Noch nichts gesehen", "Sobald JDownloader eine Datei fertig entpackt hat, taucht sie hier auf.")}
+        ${groups.length ? `<div class="rows">${groups.map(overviewGroupRow).join("")}</div>` : emptyState("Noch nichts gesehen", "Sobald JDownloader eine Datei fertig entpackt hat, taucht sie hier auf.")}
       </div>
       <div class="block" style="gap: 18px;">
         <div class="gauge-card">
@@ -1351,8 +1415,17 @@ async function renderSettings(root) {
 
 /* ------------------------------------------------------------------ actions */
 
+function onKeydown(event) {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const target = event.target.closest('[role="button"][data-action]');
+  if (!target) return;
+  event.preventDefault();
+  target.click();
+}
+
 function bindJobRows(root) {
   root.addEventListener("click", onClick);
+  root.addEventListener("keydown", onKeydown);
   qsa("form[data-action='override']", root).forEach((form) => {
     form.addEventListener("submit", onOverrideSubmit);
     form.addEventListener("input", () => { state.paused = true; });
@@ -1419,6 +1492,13 @@ async function onClick(event) {
       await api(`/api/batches/${trigger.dataset.batch}/cancel`, { method: "POST" });
       toast("Wird nach der laufenden Datei beendet");
     });
+    return;
+  }
+
+  if (action === "group-toggle") {
+    const key = trigger.dataset.key;
+    state.overviewOpen[key] = !state.overviewOpen[key];
+    await render();
     return;
   }
 
